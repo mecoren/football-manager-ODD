@@ -17,7 +17,8 @@ from typing import Any, Callable, Iterable
 
 from tools.app_paths import ASSET_ROOT
 from tools.game_layout import (
-    FM24_XGP_LAYOUT, FM26_LAYOUT, FM26_XGP_TEMPLATE, GameLayout,
+    FM24_XGP_LAYOUT, FM26_LAYOUT, FM26_XGP_TEMPLATE, FM27_EXE_SHA256,
+    FM27_LAYOUT, FM27_PENDING_NOTICE, GameLayout,
     is_fm24_xgp_module, is_fm26_xgp_module,
     layout_for_executable,
     resolve_fm24_xgp_layout, resolve_fm26_steam_layout,
@@ -1004,8 +1005,35 @@ def running_supported_processes() -> list[dict[str, Any]]:
                             layout = FM24_XGP_LAYOUT
             except OSError:
                 layout = None
-        if not layout:
-            continue
+            if not layout:
+                # A running FM27 build has no verified layout yet. Surface it
+                # as a pending row so the version switcher can select FM27;
+                # reads stay fail-closed (see select_game_layout).
+                try:
+                    pending_fm27 = sha256(path) == FM27_EXE_SHA256
+                except OSError:
+                    pending_fm27 = False
+                if not pending_fm27:
+                    continue
+                file_version = executable_file_version(path)
+                unity_version = (
+                    file_version if is_unity_engine_version(file_version) else None
+                )
+                rows.append({
+                    "pid": int(item.pid), "path": path,
+                    "thread_count": int(item.thread_count),
+                    "layout": None, "key": FM27_LAYOUT.key,
+                    "display_name": FM27_LAYOUT.display_name,
+                    "version": "27",
+                    "distribution": str(FM27_LAYOUT.distribution),
+                    "file_version": file_version or "",
+                    "build_version": str(FM27_LAYOUT.game_version or ""),
+                    "build_label": compact_build_version(FM27_LAYOUT.game_version),
+                    "unity_version": unity_version or "",
+                    "unity_label": compact_build_version(unity_version),
+                    "pending": True,
+                })
+                continue
         file_version = executable_file_version(path)
         unity_version = (
             file_version
@@ -1025,6 +1053,7 @@ def running_supported_processes() -> list[dict[str, Any]]:
             "build_label": compact_build_version(build_version),
             "unity_version": unity_version or "",
             "unity_label": compact_build_version(unity_version),
+            "pending": False,
         }
         rows.append(row)
     return sorted(
@@ -1068,6 +1097,17 @@ def select_game_layout(key: str) -> dict[str, Any]:
     selected = next((row for row in available if row["key"] == str(key)), None)
     if not selected:
         raise ValueError("所选 Football Manager 版本当前没有运行")
+    if selected.get("pending"):
+        # FM27 stays fail-closed: remember the preference and surface the
+        # pending status, but never pin a live read session to the
+        # unverified FM27_LAYOUT.
+        with _PROCESS_SELECTION_LOCK:
+            global _PREFERRED_LAYOUT_KEY, _PREFERRED_PROCESS_PID
+            global _PROCESS_LAYOUT_CACHE
+            _PREFERRED_LAYOUT_KEY = str(key)
+            _PREFERRED_PROCESS_PID = None
+            _PROCESS_LAYOUT_CACHE = None
+        return process_selection_status()
     select_game_process(
         str(key), int(selected["pid"]),
         selected=(int(selected["pid"]), str(selected["path"]), selected["layout"]),
@@ -1167,10 +1207,10 @@ def process_selection_status(*, include_internal: bool = False) -> dict[str, Any
         "selected": selected["key"] if selected else None,
         "selected_pid": int(selected["pid"]) if selected else None,
         "available": [
-            {key: row[key] for key in (
+            {key: row.get(key) for key in (
                 "key", "version", "display_name", "pid", "distribution",
                 "file_version", "build_version", "build_label",
-                "unity_version", "unity_label",
+                "unity_version", "unity_label", "pending",
             )}
             for row in available
         ],
@@ -1182,9 +1222,34 @@ def process_selection_status(*, include_internal: bool = False) -> dict[str, Any
     return result
 
 
+def _pending_fm27_process_path() -> str | None:
+    """Return the exe path of a running FM27 whose layout is still pending.
+
+    FM27 is identified by its exact fm.exe SHA256 (FM27_EXE_SHA256). The
+    check is disk-only and read-only; it exists so a FM27 attach attempt
+    fails with FM27_PENDING_NOTICE instead of a generic "not running"
+    error, and FM27_LAYOUT is never registered for live reads.
+    """
+    for item in find_processes("fm"):
+        path = item.path or ""
+        if item.name.casefold() != "fm.exe" or int(item.thread_count) <= 0:
+            continue
+        if layout_for_executable(path):
+            continue
+        try:
+            digest = sha256(path)
+        except OSError:
+            continue
+        if digest == FM27_EXE_SHA256:
+            return path
+    return None
+
+
 def select_process() -> tuple[int, str]:
     available = running_supported_processes()
     if not available:
+        if _pending_fm27_process_path() is not None:
+            raise RuntimeError(FM27_PENDING_NOTICE)
         raise RuntimeError("supported fm.exe is not running")
     with _PROCESS_SELECTION_LOCK:
         selected_key = _PREFERRED_LAYOUT_KEY
@@ -1207,6 +1272,10 @@ def select_process() -> tuple[int, str]:
             )
     if not selected:
         raise RuntimeError("selected fm.exe is not running")
+    if selected.get("pending"):
+        # Preferred FM27 build: refuse the read session with the explicit
+        # pending notice instead of resolving an unverified layout.
+        raise RuntimeError(FM27_PENDING_NOTICE)
     return int(selected["pid"]), str(selected["path"])
 
 

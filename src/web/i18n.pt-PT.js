@@ -1952,6 +1952,7 @@
   "manager.selected_ready": "Conta de administrador trocada; a leitura atual do mercado continuará",
   "manager.selected_started": "Treinador selecionado; a ligar-se ao jogo guardado atual",
   "manager.switching_game": "Mudar para {version}",
+  "manager.pending_layout": "O layout de memória do FM27 ainda não foi verificado; a leitura do FM27 está desativada",
   "manager.unemployed.confirm": "Confirme o desemprego e continue",
   "manager.unemployed.message": "O treinador humano “{manager}” foi detetado, mas não foi encontrada qualquer equipa gerida. Confirme se este treinador está desempregado. O ODD continuará disponível e reconhecerá automaticamente um novo treinador.",
   "manager.unemployed.title": "Confirmar o estado do treinador",

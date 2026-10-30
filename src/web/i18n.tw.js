@@ -1951,6 +1951,7 @@
     "manager.selected_ready": "已切換總教練帳戶，沿用目前盤口",
     "manager.selected_started": "已選擇總教練，正在連線目前存檔",
     "manager.switching_game": "正在切換到 {version}",
+    "manager.pending_layout": "FM27 記憶體配置尚未驗證，暫無法讀取 FM27 資料",
     "manager.unemployed.confirm": "確認無業並繼續",
     "manager.unemployed.message": "已識別到人類總教練「{manager}」，但暫時沒有找到執教球隊。請確認該總教練目前確實處於無業狀態；確認後可以使用 ODD，入職俱樂部後會自動識別並沿用目前帳戶。",
     "manager.unemployed.title": "確認總教練狀態",

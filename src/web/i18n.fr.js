@@ -2668,6 +2668,7 @@
     "manager.merge_unavailable": "À least two comptes avec le même ID sont requis",
     "manager.unsupported_game": "Aucun supported jeu version detected",
     "manager.switching_game": "Switching à {version}",
+    "manager.pending_layout": "Disposition mémoire de FM27 pas encore vérifiée ; la lecture de FM27 reste désactivée",
     "manager.club_change.title": "Dirigé club variation detected",
     "manager.club_change.confirm": "Confirmer switch",
     "manager.club_change.message": "{manager}’s dirigé club modifié de “{previous}” à “{next}”. Switch à le Nouveau club? FMODD va lire its données et keep le Actuel entraîneur compte.",

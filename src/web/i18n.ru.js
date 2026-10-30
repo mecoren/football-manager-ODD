@@ -1897,6 +1897,7 @@
   "manager.selected_ready": "Управляющий аккаунт переключен; текущие чтения рынка будут продолжаться",
   "manager.selected_started": "Менеджер выбран; подключение к текущему сохранению",
   "manager.switching_game": "Тренер: {version}",
+  "manager.pending_layout": "Раскладка памяти FM27 ещё не проверена; чтение FM27 отключено",
   "manager.unemployed.confirm": "Подтвердить безработицу и продолжить",
   "manager.unemployed.message": "Тренер: {manager}",
   "manager.unemployed.title": "Подтвердить статус менеджера",

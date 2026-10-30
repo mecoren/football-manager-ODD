@@ -76,6 +76,7 @@ FM24 连接阶段只验证已缓存的本地存档名称对象地址，不为首
 | `src/tools/domain_errors.py` | 领域异常分类与稳定 API 错误载荷（错误码、可重试性、阶段和详情） |
 | `src/tools/money.py` | 金额的最小货币单位整数换算、乘法取整、持久化字段迁移和兼容镜像 |
 | `src/tools/game_layout.py` | 选择 FM24/FM26 代际与 Steam/Epic/XGP 分发版本的模块、vtable 和字段布局 |
+| `src/tools/game_layout.py`（FM27 pending） | FM27 Steam 身份常量（`FM27_EXE_SHA256`/`FM27_STEAM_PLUGIN_SHA256`）与静态探测骨架 `FM27_LAYOUT`（RTTI vtable、game-date、database-root 与 human-manager-root AOB 已静态解析并在实机验证；数据库根指针表的九张原生表槽位布局与 FM26 完全一致，club/competition/team/national-team-container 行对象身份已按行 vtable 实机验证，player/APNP/staff vtable 已按 person 表行证据收窄；结构偏移仍全部为占位 0）。`FM27_LAYOUT` 不进入 `SUPPORTED_LAYOUTS`/`LAYOUT_BY_HASH`，永不驱动实机读取；附加尝试在 `select_process` 以 `FM27_PENDING_NOTICE` 拒绝。版本偏好白名单扩展为 `fm24`/`fm26`/`fm27`：运行中的 FM27 以 `pending` 行进入进程发现与版本切换器，`select_game_layout("fm27")` 只记录偏好并返回状态、不 pin 读取会话，`available` 输出带 `pending` 标记（`row.get` 兼容）。实机验证入口为 `scripts/verify_fm27_layout.py`（只读，含数据库表检查，需已加载存档） |
 | `src/tools/game_session.py` | FM24/FM26 共用的常驻只读进程会话；复用进程句柄与模块身份，业务 Reader 仍按请求创建以避免缓存易变字段 |
 | `src/tools/database_index.py` | 会话级原生数据库对象目录；从版本 AOB 定位 Club/Competition/Nation/Person/Stadium/Team 表和人类经理容器，提供 UID/vtable 到实时地址的只读索引，并维护世界球员轻量姓名搜索缓存 |
 | `src/tools/refresh_memory_core.py` | 受保护的刷新内存核心；负责固定/动态赛程池发现、池结构校验、同 slab 补全和有界私有内存回退扫描 |

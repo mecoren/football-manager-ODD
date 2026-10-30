@@ -13,7 +13,7 @@ DEFAULT_RESULT_RETENTION_SEASONS = 2
 ODDS_SCOPE_OPTIONS = {"favorite_schedule", "famous", "all"}
 ODDS_DAYS_OPTIONS = {3, 7, 14}
 ODDS_AUTO_REFRESH_OPTIONS = {0, 8, 30, 60}
-PREFERRED_GAME_VERSION_OPTIONS = {"fm24", "fm26"}
+PREFERRED_GAME_VERSION_OPTIONS = {"fm24", "fm26", "fm27"}
 UI_LOCALE_OPTIONS = {
     "en-GB", "zh-CN", "zh-TW", "ko-KR", "de-DE", "es-ES", "fr-FR", "ru-RU", "ja-JP",
     "pt-BR", "pt-PT",
@@ -294,7 +294,7 @@ def set_championship_enabled(enabled: Any) -> dict[str, Any]:
 def set_preferred_game_version(key: Any) -> dict[str, Any]:
     resolved = str(key or "")
     if resolved not in PREFERRED_GAME_VERSION_OPTIONS:
-        raise ValueError("game version must be fm24 or fm26")
+        raise ValueError("game version must be fm24, fm26 or fm27")
     with _LOCK:
         payload = load_settings()
         payload["preferred_game_version"] = resolved

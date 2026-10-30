@@ -27,6 +27,19 @@ FM24_XGP_PE_TIMESTAMP = 0x67FF9A0A
 FM24_XGP_IMAGE_SIZE = 0x1CD9F000
 FM26_XGP_PE_TIMESTAMP = 0x6A229DA9
 FM26_XGP_IMAGE_SIZE = 0x1EDF4000
+# Steam FM27 (Unity 6000.3.18f1-custom). The fm.exe hash identifies the
+# running process; the plugin hash pins the game_plugin.dll build whose
+# statically resolved RVAs are recorded in FM27_LAYOUT. The game-date AOB
+# is byte-identical to FM26's and still matches exactly one location in
+# that plugin build, but the constant stays separate so the two games can
+# diverge in a future update without touching FM26 resolution.
+FM27_EXE_SHA256 = "2A7318C6984BCB3A19FF3304432B63462581CEE33BA203F9A0A118F11C69E27E"
+FM27_STEAM_PLUGIN_SHA256 = "BC940E472418FC5C214208D7CF30FECF600F689B6F9D71C11BA19A2DF0FE057F"
+FM27_GAME_DATE_PATTERN = FM26_GAME_DATE_PATTERN
+FM27_PENDING_NOTICE = (
+    "Football Manager 27 detected, but its FM27 memory layout is not "
+    "verified yet; FMODD refuses to attach without build-specific offsets"
+)
 
 
 @dataclass(frozen=True)
@@ -1150,6 +1163,84 @@ FM26_XGP_TEMPLATE = replace(
     youth_generation_pa_hook_rva=None,
     youth_generation_state_hook_rva=None,
     youth_son_hook_rva=None,
+)
+
+
+# Football Manager 27 (Steam). Read-only static probe of the local install
+# (Unity 6000.3.18f1-custom, game_plugin.dll 433986560 bytes, SHA256
+# FM27_STEAM_PLUGIN_SHA256). The FM26 RTTI class names, the game-date AOB
+# and the human-manager marker each match exactly one location in that
+# build, so the values below were resolved statically from the plugin file
+# without launching the game:
+#   fixture          .?AVFIXTURE@sicomps@@                 0x4CB69A8
+#   fixture_result   .?AVFIXTURE_RESULT@sicomps@@          0x4AFDE68
+#   season_result    .?AVBASIC_SCORELINE@SCORELINE@db@@    0x4AFC318
+#   team             .?AVTEAM@db@@                         0x4CE1108
+#   national_team    .?AVNATIONAL_TEAM@db@@                0x4DC2288
+#   nation           .?AVNATIONAL_TEAM_CONTAINER@db@@      0x4CEC0B8
+#   club             .?AVCLUB@db@@                         0x4CDA1F8
+#   competition      .?AVCOMP@db@@                         0x4CDFAD8
+#   player           .?AVACTUAL_PLAYER@db@@                0x4D27228, 0x4D27708, 0x4D27758
+#   player_non_player .?AVACTUAL_PLAYER_AND_NON_PLAYER@db@@ 0x4F75A08, 0x4F75EE8, 0x4F75F38
+#   staff            .?AVACTUAL_NON_PLAYER@db@@            0x4D8BE28, 0x4D8BE78
+#   game date        FM26_GAME_DATE_PATTERN                0x56AD378
+#   database root    FM26 database_root_pattern            probe 0x2E8749A -> 0x57036D0
+#   human mgr root   FM26 human_manager_root_pattern       probe 0xEB7253 -> 0x56F3008
+#
+# Everything else stays unresolved. This layout is deliberately NOT listed
+# in SUPPORTED_LAYOUTS / LAYOUT_BY_HASH: the zero structural offsets are
+# placeholders (same convention as FM26_XGP_TEMPLATE) and the layout must
+# never drive a live read session until every remaining offset has been
+# verified against the running game. attach attempt for this build fails
+# with FM27_PENDING_NOTICE instead.
+FM27_LAYOUT = GameLayout(
+    key="fm27",
+    display_name="Football Manager 27",
+    game_version="27.0",
+    executable_sha256=FM27_EXE_SHA256,
+    module_name="game_plugin.dll",
+    distribution="steam",
+    fixture_vtable_rva=0x4CB69A8,
+    fixture_result_vtable_rva=0x4AFDE68,
+    season_result_vtable_rva=0x4AFC318,
+    team_vtable_rva=0x4CE1108,
+    national_team_vtable_rva=0x4DC2288,
+    nation_vtable_rva=0x4CEC0B8,
+    club_vtable_rva=0x4CDA1F8,
+    competition_vtable_rva=0x4CDFAD8,
+    # Row-object evidence from the live person table (scripts/
+    # verify_fm27_layout.py + probe round 9): rows are mostly db::PERSON
+    # (0x4CC2578) with ACTUAL_PLAYER rows on 0x4D27758/0x4D27708 (equal
+    # copies; 0x4D27228 never appears as a row vtable), ACTUAL_NON_PLAYER
+    # rows on 0x4D8BE78 and ACTUAL_PLAYER_AND_NON_PLAYER rows on
+    # 0x4F75F38. The never-observed copies stay excluded.
+    actual_player_vtable_rvas=(0x4D27708, 0x4D27758),
+    player_and_non_player_vtable_rvas=(0x4F75F38,),
+    staff_person_vtable_rva=0x4D8BE78,
+    game_date_rva=0x56AD378,
+    # Same generation as FM26: both root AOBs match exactly one location in
+    # the FM27 plugin. The resolved pointer-table globals were confirmed to
+    # hold live non-null heap pointers against a running 27.0 session via
+    # scripts/verify_fm27_layout.py.
+    database_root_pattern=FM26_LAYOUT.database_root_pattern,
+    database_root_probe_rva=0x2E8749A,
+    database_root_rel32_offset=7,
+    database_root_instruction_size=11,
+    human_manager_root_pattern=FM26_LAYOUT.human_manager_root_pattern,
+    human_manager_root_probe_rva=0xEB7253,
+    human_manager_root_rel32_offset=3,
+    human_manager_root_instruction_size=7,
+    human_manager_vtable_rvas=(),
+    # Unresolved structural offsets; placeholders only (see comment above).
+    player_person_offset=0,
+    player_and_non_player_person_offset=0,
+    player_positions_offset=0,
+    player_attributes_offset=0,
+    player_ca_offset=0,
+    player_pa_offset=0,
+    player_ca_bytes=0,
+    attribute_display_bias=0,
+    manager_person_offset=0,
 )
 
 

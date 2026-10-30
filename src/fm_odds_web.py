@@ -3770,7 +3770,7 @@ def validate_bet_snapshot(
 
 def restore_preferred_game_layout() -> None:
     preferred = str(load_settings().get("preferred_game_version") or "")
-    if preferred not in {"fm24", "fm26"}:
+    if preferred not in {"fm24", "fm26", "fm27"}:
         return
     try:
         select_game_layout(preferred)

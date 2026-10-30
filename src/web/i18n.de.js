@@ -716,6 +716,7 @@
     "manager.merge_unavailable": "Mindestens zwei Konten mit derselben ID sind erforderlich",
     "manager.unsupported_game": "Keine unterstützte Spielversion erkannt",
     "manager.switching_game": "Wechsel zu {version}",
+    "manager.pending_layout": "FM27-Speicherlayout ist noch nicht verifiziert; das Lesen von FM27 bleibt deaktiviert",
     "manager.club_change.title": "Änderung des betreuten Vereins erkannt",
     "manager.club_change.confirm": "Wechsel bestätigen",
     "manager.club_change.message": "Der betreute Verein von {manager} wurde von „{previous}“ zu „{next}“ geändert. Zum neuen Verein wechseln? FMODD liest dessen Daten und behält das aktuelle Managerkonto.",

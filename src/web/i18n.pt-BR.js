@@ -1952,6 +1952,7 @@
   "manager.selected_ready": "Conta de administrador trocada; a leitura atual do mercado continuará",
   "manager.selected_started": "Gerente selecionado; conectando-se ao save atual",
   "manager.switching_game": "Mudando para {version}",
+  "manager.pending_layout": "O layout de memória do FM27 ainda não foi verificado; a leitura do FM27 está desativada",
   "manager.unemployed.confirm": "Confirme o desemprego e continue",
   "manager.unemployed.message": "O gerente humano “{manager}” foi detectado, mas nenhuma equipe gerenciada foi encontrada. Confirme se este gerente está desempregado. O ODD permanecerá disponível e reconhecerá automaticamente um novo clube.",
   "manager.unemployed.title": "Confirmar status de gerente",

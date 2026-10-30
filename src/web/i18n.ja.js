@@ -450,7 +450,7 @@
     "manager.merge_title": "現在の同一IDアカウント{count}件を新しいアカウントに統合",
     "manager.merge_unavailable": "同じIDのアカウントが2件以上必要です",
     "manager.unsupported_game": "対応するゲームバージョンが検出されませんでした",
-    "manager.switching_game": "{version}に切り替え中", "manager.club_change.title": "担当クラブの変更を検出しました",
+    "manager.switching_game": "{version}に切り替え中", "manager.pending_layout": "FM27のメモリレイアウトは未検証のため、FM27データの読み取りは無効です", "manager.club_change.title": "担当クラブの変更を検出しました",
     "manager.club_change.confirm": "切り替えを確認",
     "manager.club_change.message": "{manager}の担当クラブが「{previous}」から「{next}」に変わりました。新しいクラブへ切り替えますか？FMODDは新しいクラブのデータを読み込み、現在の監督アカウントを維持します。",
     "manager.club_change_confirmed": "担当クラブの変更を確認しました。新しいクラブのデータを読み込み中です",

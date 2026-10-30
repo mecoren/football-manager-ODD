@@ -25,8 +25,19 @@ def test_preferred_game_version_is_persisted() -> None:
 
 
 def test_invalid_preferred_game_version_is_rejected() -> None:
-    with pytest.raises(ValueError, match="fm24 or fm26"):
+    with pytest.raises(ValueError, match="fm24, fm26 or fm27"):
         app_settings.set_preferred_game_version("fm25")
+
+
+def test_fm27_preferred_game_version_is_persisted() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        settings_path = Path(directory) / "settings.json"
+        with patch.object(app_settings, "SETTINGS_PATH", settings_path):
+            saved = app_settings.set_preferred_game_version("fm27")
+            loaded = app_settings.load_settings()
+
+    assert saved["preferred_game_version"] == "fm27"
+    assert loaded["preferred_game_version"] == "fm27"
 
 
 def test_invalid_stored_preference_is_ignored() -> None:
@@ -57,6 +68,16 @@ def test_startup_ignores_temporarily_unavailable_preference() -> None:
         restore_preferred_game_layout()
 
     select.assert_called_once_with("fm24")
+
+
+def test_startup_restores_pending_fm27_preference() -> None:
+    with (
+        patch("fm_odds_web.load_settings", return_value={"preferred_game_version": "fm27"}),
+        patch("fm_odds_web.select_game_layout") as select,
+    ):
+        restore_preferred_game_layout()
+
+    select.assert_called_once_with("fm27")
 
 
 def test_manual_account_scope_is_reused_for_same_manager_and_generation() -> None:

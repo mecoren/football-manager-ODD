@@ -10111,7 +10111,8 @@ function renderGameVersionSwitcher(roots = shellDomIndex().gameVersionRoots) {
     build.textContent = selected?.build_label || "";
     build.hidden = !selected?.build_label;
     const distribution = ({steam:"Steam",epic:"Epic",xgp:"XGP"})[selected?.distribution] || selected?.distribution || "";
-    button.title = selected ? [selected.display_name, distribution, selected.build_version ? `FM ${selected.build_version}` : "", selected.unity_version ? `Unity ${selected.unity_version}` : ""].filter(Boolean).join(" · ") : uiText("manager.unsupported_game");
+    const selectedTitle = selected ? [selected.display_name, distribution, selected.build_version ? `FM ${selected.build_version}` : "", selected.unity_version ? `Unity ${selected.unity_version}` : ""].filter(Boolean).join(" · ") : uiText("manager.unsupported_game");
+    button.title = selected?.pending ? `${selectedTitle} · ${uiText("manager.pending_layout")}` : selectedTitle;
     root.classList.toggle("selectable", available.length > 1);
     if (available.length <= 1) root.classList.remove("open");
     button.disabled = available.length <= 1;
@@ -10122,7 +10123,7 @@ function renderGameVersionSwitcher(roots = shellDomIndex().gameVersionRoots) {
       });
       root.classList.toggle("open");
     } : null;
-    menu.innerHTML = available.length > 1 ? available.map((item) => `<button type="button" data-select-game-version="${escapeHtml(item.key)}" class="${item.key === selected?.key ? "active" : ""}">FM ${escapeHtml(item.version)}</button>`).join("") : "";
+    menu.innerHTML = available.length > 1 ? available.map((item) => `<button type="button" data-select-game-version="${escapeHtml(item.key)}" class="${item.key === selected?.key ? "active" : ""}" ${item.pending ? `title="${escapeHtml(uiText("manager.pending_layout"))}"` : ""}>FM ${escapeHtml(item.version)}${item.pending ? " *" : ""}</button>`).join("") : "";
     menu.querySelectorAll("[data-select-game-version]").forEach((item) => item.addEventListener("click", async (event) => {
       event.stopPropagation();
       const key = item.dataset.selectGameVersion;
