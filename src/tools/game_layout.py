@@ -1231,15 +1231,33 @@ FM27_LAYOUT = GameLayout(
     human_manager_root_rel32_offset=3,
     human_manager_root_instruction_size=7,
     human_manager_vtable_rvas=(),
-    # Unresolved structural offsets; placeholders only (see comment above).
+    # Person fields verified against real players (probe rounds 10-19):
+    # +0x0C entity UID, +0x40 full name, +0x50 first name, +0x58 last name,
+    # +0x68 pointer to db::NATION, +0x88 DOB (year<<16 | day-of-year).
+    # Edmond Tapsoba resolved to 1999-d33 (born 1999-02-02).
+    person_full_name_offset=0x40,
+    person_first_name_offset=0x50,
+    person_last_name_offset=0x58,
+    person_nationality_offset=0x68,
+    person_date_of_birth_offset=0x88,
+    person_date_of_birth_day_year=False,
+    # Person table rows are the Person-derived objects themselves, so the
+    # person sub-object sits at +0. +0x288 points at a shared container
+    # (uid 0x7FF9 across every player) and is NOT a person reference.
     player_person_offset=0,
     player_and_non_player_person_offset=0,
+    # CA/PA: u16 pair at 0x3A4/0x3A6 confirmed over 300 named players with
+    # a realistic (CA<=PA, 40..199) distribution and an age-consistent
+    # 2031 save curve (Bellingham 188/188, Mbappe 161/188, Tapsoba 143/152).
+    # Equidistant twins at 0x76C/0xB34/0xEFC (stride 0x3C8) are derived
+    # views and stay unused.
+    player_ca_offset=0x3A4,
+    player_pa_offset=0x3A6,
+    player_ca_bytes=2,
+    attribute_display_bias=0,
+    # Still unresolved: positions, attributes, height, manager person offset.
     player_positions_offset=0,
     player_attributes_offset=0,
-    player_ca_offset=0,
-    player_pa_offset=0,
-    player_ca_bytes=0,
-    attribute_display_bias=0,
     manager_person_offset=0,
 )
 

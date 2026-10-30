@@ -113,19 +113,31 @@ class FM27PendingLayoutTests(unittest.TestCase):
         self.assertEqual(layout.human_manager_root_rel32_offset, 3)
         self.assertEqual(layout.human_manager_root_instruction_size, 7)
 
+    def test_verified_person_and_ability_fields_are_recorded(self):
+        layout = FM27_LAYOUT
+        self.assertEqual(layout.person_full_name_offset, 0x40)
+        self.assertEqual(layout.person_first_name_offset, 0x50)
+        self.assertEqual(layout.person_last_name_offset, 0x58)
+        self.assertEqual(layout.person_nationality_offset, 0x68)
+        self.assertEqual(layout.person_date_of_birth_offset, 0x88)
+        self.assertFalse(layout.person_date_of_birth_day_year)
+        self.assertEqual(layout.player_person_offset, 0)
+        self.assertEqual(layout.player_and_non_player_person_offset, 0)
+        self.assertEqual(layout.player_ca_offset, 0x3A4)
+        self.assertEqual(layout.player_pa_offset, 0x3A6)
+        self.assertEqual(layout.player_ca_bytes, 2)
+
     def test_unverified_structural_offsets_stay_disabled(self):
         layout = FM27_LAYOUT
         for offset in (
-            layout.player_person_offset,
-            layout.player_and_non_player_person_offset,
             layout.player_positions_offset,
             layout.player_attributes_offset,
-            layout.player_ca_offset,
-            layout.player_pa_offset,
             layout.manager_person_offset,
         ):
             self.assertEqual(offset, 0)
-        self.assertEqual(layout.player_ca_bytes, 0)
+        self.assertIsNone(layout.person_flags_offset)
+        self.assertIsNone(layout.person_hidden_attributes_offset)
+        self.assertIsNone(layout.player_season_stats_root_offset)
         self.assertEqual(layout.human_manager_vtable_rvas, ())
         self.assertFalse(layout.staff_abilities_verified)
         self.assertIsNone(layout.fixture_pool_rva)

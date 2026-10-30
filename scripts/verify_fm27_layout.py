@@ -164,6 +164,88 @@ def verify_database_tables(
             print(f"{name} table: PASS (rows={count}, row vtables verified)")
 
 
+def verify_person_fields(
+    process: object, base: int, size: int, root_table_rva: int,
+    failures: list[str],
+) -> None:
+    """Sample ACTUAL_PLAYER rows and check the verified Person fields."""
+    layout = FM27_LAYOUT
+
+    def read(address: int, length: int):
+        return read_process_memory(process, address, length)
+
+    def ptr(address: int) -> int:
+        raw = read(address, 8)
+        return struct.unpack("<Q", raw)[0] if raw and len(raw) == 8 else 0
+
+    def string_at(address: int) -> str:
+        pointer = ptr(address)
+        if not pointer:
+            return ""
+        header = read(pointer, 4)
+        if not header or len(header) != 4:
+            return ""
+        length = struct.unpack("<I", header)[0]
+        if not 0 < length <= 96:
+            return ""
+        raw = read(pointer + 4, length)
+        return raw.decode("utf-8", "replace") if raw else ""
+
+    table_object = ptr(base + root_table_rva + 0x68)
+    if not table_object:
+        print("person fields: SKIP (slot empty; load a save first)")
+        return
+    vector = ptr(table_object + 0x80)
+    header = read(vector, 0x18) if vector else None
+    if not header or len(header) != 0x18:
+        failures.append("person table header unreadable")
+        return
+    begin, end, _cap = struct.unpack("<QQQ", header)
+    count = (end - begin) // 8
+    player_vtables = {
+        int(rva) for rva in tuple(layout.actual_player_vtable_rvas)
+    }
+
+    sampled = named = dated = abilities = 0
+    index = 0
+    while index < count and sampled < 200:
+        obj = ptr(begin + index * 8)
+        index += 29
+        if not obj:
+            continue
+        vtable = ptr(obj)
+        rva = vtable - base if base <= vtable < base + size else -1
+        if rva not in player_vtables:
+            continue
+        sampled += 1
+        if string_at(obj + int(layout.person_full_name_offset)):
+            named += 1
+        dob = read(obj + int(layout.person_date_of_birth_offset), 4)
+        if dob and len(dob) == 4:
+            code = struct.unpack("<I", dob)[0]
+            year, day = code >> 16, code & 0x1FF
+            if 1960 <= year <= 2015 and 1 <= day <= 366:
+                dated += 1
+        pair = read(obj + int(layout.player_ca_offset), 4)
+        if pair and len(pair) == 4:
+            ca, pa = struct.unpack("<HH", pair)
+            if 1 <= ca <= 200 and ca <= pa <= 200:
+                abilities += 1
+
+    if sampled == 0:
+        print("person fields: SKIP (no sampled player rows)")
+        return
+    ratio = lambda hits: hits / sampled  # noqa: E731
+    print(
+        f"person fields: sampled={sampled} name={ratio(named):.0%} "
+        f"dob={ratio(dated):.0%} ca_pa={ratio(abilities):.0%}"
+    )
+    # The table also holds unnamed grey/youth players, so only require at
+    # least one readable name (a wrong name offset yields none at all).
+    if named == 0 or ratio(dated) < 0.9 or ratio(abilities) < 0.9:
+        failures.append("person field validation failed")
+
+
 def main() -> None:
     pid, process_path = find_fm27_process()
     failures: list[str] = []
@@ -244,6 +326,7 @@ def main() -> None:
         root_table_rva = resolved_roots.get("database_root")
         if root_table_rva:
             verify_database_tables(process, base, size, root_table_rva, failures)
+            verify_person_fields(process, base, size, root_table_rva, failures)
         else:
             failures.append("database tables skipped; database root unresolved")
 
