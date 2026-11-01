@@ -25581,6 +25581,68 @@ function openSettingsWithTab(tabKey) {
   activateSettingsTab(tabKey);
 }
 
+function applyWorldPlayerAttributeDraft(player, draft) {
+  const content = $("#world-player-editor-content");
+  if (!content || !draft) return;
+  const original = new Map(Object.entries(player?.attributes || {}).flatMap(
+    ([group, values]) => Object.entries(values || {}).map(([name, value]) => [`${group}:${name}`, Number(value)]),
+  ));
+  const inputs = new Map([...content.querySelectorAll("[data-world-player-attribute]")].map((input) => [input.dataset.worldPlayerAttribute, input]));
+  Object.entries(draft.attributes || {}).forEach(([key, row]) => {
+    const input = inputs.get(key);
+    if (!input) return;
+    input.value = String(Number(row.after));
+    // Highlighting the moved fields is the "old to new" review step: the input
+    // only carries the new value, so the untouched ones have to look untouched.
+    const before = original.get(key);
+    if (before != null && Number(row.after) !== before) input.dataset.draftChanged = "true";
+    else delete input.dataset.draftChanged;
+  });
+  // The draft is only trustworthy if the CA moves with it, so the CA field
+  // takes the settled value rather than the requested one on a miss.
+  const settled = Number(draft.hit ? draft.target_ca : draft.formula_ca);
+  const caInput = content.querySelector('[data-world-player-field="ca"]');
+  if (caInput && Number.isFinite(settled)) caInput.value = String(settled);
+  const status = content.querySelector("[data-world-player-draft-status]");
+  if (!status) return;
+  status.dataset.hit = draft.hit ? "true" : "false";
+  const parts = [draft.hit
+    ? uiText("world.editor.draft_applied", {ca:Number(draft.formula_ca)})
+    : uiText("world.editor.draft_missed", {target:Number(draft.target_ca), ca:Number(draft.formula_ca)})];
+  const slots = (draft.positions_used || []).map((row) => row.slot).join(" / ");
+  if (slots) parts.push(uiText("world.editor.draft_positions", {positions:slots}));
+  (draft.warnings || []).forEach((row) => {
+    const key = `world.editor.draft_warn.${row.code}`;
+    const text = uiText(key, row.params || {});
+    if (text && text !== key) parts.push(text);
+  });
+  status.textContent = parts.join(" ");
+}
+
+async function generateWorldPlayerAttributeDraft(player) {
+  const content = $("#world-player-editor-content");
+  if (!content || app.worldPlayerEditorBusy) return;
+  const status = content.querySelector("[data-world-player-draft-status]");
+  const style = content.querySelector("[data-world-player-draft-style]")?.value || "balanced";
+  const targetCa = Number(content.querySelector("[data-world-player-draft-ca]")?.value || 0);
+  if (!Number.isInteger(targetCa) || targetCa < 1 || targetCa > 200) {
+    if (status) {
+      status.dataset.hit = "false";
+      status.textContent = uiText("world.editor.draft_ca_invalid");
+    }
+    return;
+  }
+  try {
+    const response = await runWorldPlayerEditorAction(uiText("world.editor.busy_draft"), () => request("/api/world-players/attribute-draft", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id:Number(player.id),target_ca:targetCa,style,expected_raw:player.editor?.expected_raw?.attributes || ""})}));
+    if (!response?.draft) return;
+    applyWorldPlayerAttributeDraft(player, response.draft);
+  } catch (error) {
+    if (!status) return;
+    status.dataset.hit = "false";
+    status.textContent = error.message || uiText("world.editor.draft_failed");
+  }
+}
+
 function openWorldPlayerEditor(player, options = {}) {
   const dialog = $("#world-player-editor-dialog");
   const editor = player?.editor || {};
@@ -25627,6 +25689,13 @@ function openWorldPlayerEditor(player, options = {}) {
   const hidden = Object.entries(player.hidden_attributes || {}).map(([name, value]) =>
     `<label class="world-player-editor-field compact"><span>${escapeHtml(name)}</span><input type="number" min="${["适应性","雄心","忠诚","抗压能力","职业素养","体育精神","情绪控制","争论"].includes(name) ? 0 : 1}" max="20" step="1" value="${Number(value)}" data-world-player-hidden="${escapeHtml(name)}"></label>`,
   ).join("");
+  // A draft only ever fills inputs; "save changes" still owns the write, so the
+  // optimistic lock and the rollback path stay exactly where they were.
+  const draftStyles = (editor.options?.attribute_styles || [])
+    .filter((row) => capabilities.goalkeeper ? row.goalkeeper : row.outfield)
+    .map((row) => `<option value="${escapeHtml(row.key)}">${escapeHtml(uiText(`world.editor.style.${row.key}`))}</option>`)
+    .join("");
+  const draftSection = draftStyles ? `<section class="world-player-editor-section"><h3>${uiText("world.editor.attribute_draft")}</h3><div class="world-player-editor-draft"><label class="world-player-editor-field"><span>${uiText("world.editor.draft_style")}</span><select data-world-player-draft-style>${draftStyles}</select></label><label class="world-player-editor-field"><span>${uiText("world.editor.draft_target_ca")}</span><input type="number" min="1" max="200" step="1" value="${Number(player.ca || 1)}" data-world-player-draft-ca></label><button type="button" class="world-player-editor-inline-action" data-world-player-draft-generate>${uiText("world.editor.draft_generate")}</button></div><p class="world-player-editor-muted world-player-editor-draft-status" data-world-player-draft-status role="status" aria-live="polite">${uiText("world.editor.draft_hint")}</p></section>` : "";
   const nameSection = capabilities.names ? `<section class="world-player-editor-section"><h3>${uiText("world.editor.native_names")}</h3><div class="world-player-editor-grid">${worldPlayerNameInput("full_name", uiText("world.editor.full_name"), player.full_name)}${worldPlayerNameInput("first_name", uiText("world.editor.first_name"), player.first_name)}${worldPlayerNameInput("last_name", uiText("world.editor.last_name"), player.last_name)}${worldPlayerNameInput("common_name", uiText("world.editor.common_name"), player.common_name)}</div><button type="button" class="world-player-editor-inline-action" data-world-player-names-save>${uiText("world.editor.save_native_names")}</button></section>` : "";
   const contract = player.player_contract;
   const contractStatus = Number(contract?.transfer_status_raw || 0);
@@ -25657,7 +25726,7 @@ function openWorldPlayerEditor(player, options = {}) {
   const injurySectionWithAdd = `<section class="world-player-editor-section"><h3>${uiText("world.editor.injury")}</h3><div class="world-player-editor-action-row"><span>${injuryRows ? uiText("world.editor.injury_count", {count:Number(injuryRows)}) : uiText("world.editor.no_injury")}</span><button type="button" data-world-player-injury-add>${uiText("world.editor.add_injury")}</button>${injuryRows ? `<button type="button" data-world-player-injury-remove>${uiText("world.editor.clear")}</button>` : ""}</div></section>`;
   const unhappinessSection = player.has_unhappiness === true ? `<section class="world-player-editor-section"><h3>${uiText("world.editor.unhappiness")}</h3><div class="world-player-editor-action-row"><span>${uiText("world.editor.unhappiness_present")}</span><button type="button" data-world-player-unhappiness-clear>${uiText("world.editor.clear")}</button></div></section>` : "";
   const retirementSection = player.retirement?.has_plan ? `<section class="world-player-editor-section"><h3>${uiText("world.editor.retirement")}</h3><div class="world-player-editor-action-row"><select id="world-player-retirement-action"><option value="cancel">${uiText("world.editor.retirement_cancel")}</option><option value="six_months">${uiText("world.editor.retirement_six_months")}</option><option value="two_years">${uiText("world.editor.retirement_two_years")}</option><option value="ten_years">${uiText("world.editor.retirement_ten_years")}</option><option value="twenty_years">${uiText("world.editor.retirement_twenty_years")}</option></select><button type="button" data-world-player-retirement-save>${uiText("world.editor.save")}</button></div></section>` : "";
-  $("#world-player-editor-content").innerHTML = `${section(uiText("world.editor.basics"), basics)}${nameSection}${section(uiText("world.editor.status_reputation"), status)}${section(uiText("world.editor.positions"), positions)}${attributes ? `<section class="world-player-editor-section"><h3>${uiText("world.editor.attributes")}</h3><div class="world-player-editor-attribute-groups">${attributes}</div></section>` : ""}${section(uiText("world.editor.hidden_attributes"), hidden)}${languageSection}${preferredSection}${primaryNationalitySection}${nationalitySection}${injurySectionWithAdd}${unhappinessSection}${retirementSection}`;
+  $("#world-player-editor-content").innerHTML = `${section(uiText("world.editor.basics"), basics)}${nameSection}${section(uiText("world.editor.status_reputation"), status)}${section(uiText("world.editor.positions"), positions)}${draftSection}${attributes ? `<section class="world-player-editor-section"><h3>${uiText("world.editor.attributes")}</h3><div class="world-player-editor-attribute-groups">${attributes}</div></section>` : ""}${section(uiText("world.editor.hidden_attributes"), hidden)}${languageSection}${preferredSection}${primaryNationalitySection}${nationalitySection}${injurySectionWithAdd}${unhappinessSection}${retirementSection}`;
   if (contractSection) $("#world-player-editor-content").insertAdjacentHTML("afterbegin", contractSection);
   const content = $("#world-player-editor-content");
   content.querySelectorAll("[data-world-player-language-save]").forEach((button) => button.addEventListener("click", () => saveWorldPlayerLanguage(player, Number(button.dataset.worldPlayerLanguageSave), Number(content.querySelector(`[data-world-player-language-level=\"${button.dataset.worldPlayerLanguageSave}\"]`)?.value || 0), options)));
@@ -25672,6 +25741,7 @@ function openWorldPlayerEditor(player, options = {}) {
   content.querySelector("[data-world-player-retirement-save]")?.addEventListener("click", () => saveWorldPlayerRetirement(player, $("#world-player-retirement-action").value, options));
   content.querySelector("[data-world-player-contract-save]")?.addEventListener("click", () => saveWorldPlayerContract(player, options));
   content.querySelector("[data-world-player-names-save]")?.addEventListener("click", () => saveWorldPlayerNames(player, options));
+  content.querySelector("[data-world-player-draft-generate]")?.addEventListener("click", () => generateWorldPlayerAttributeDraft(player));
   if (!dialog.open) dialog.showModal();
   syncWorldPlayerEditorBusy();
   renderIcons(dialog);

@@ -5,6 +5,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from tools.player_attribute_builder import attribute_style_catalog
+
 
 ROOT = (Path(__file__).resolve().parents[1] / "src")
 
@@ -70,6 +72,51 @@ def test_world_player_editor_representative_runtime_copy() -> None:
         "유형 7",
         "2개",
     ]
+
+
+def test_every_attribute_draft_key_resolves_in_the_core_catalogs() -> None:
+    # The draft panel builds its style options from the server catalog, so a
+    # style added in player_attribute_builder without matching copy would quietly
+    # render the raw message key instead of a label.
+    keys = [
+        "world.editor.attribute_draft", "world.editor.draft_style",
+        "world.editor.draft_target_ca", "world.editor.draft_generate",
+        "world.editor.draft_hint", "world.editor.draft_applied",
+        "world.editor.draft_missed", "world.editor.draft_positions",
+        "world.editor.draft_ca_invalid", "world.editor.draft_failed",
+        "world.editor.busy_draft",
+        "world.editor.draft_warn.sweeper_fallback",
+        "world.editor.draft_warn.formula_unreadable",
+        "world.editor.draft_warn.unreachable",
+        "world.editor.draft_warn.target_above_pa",
+        *(
+            f"world.editor.style.{row['key']}"
+            for row in attribute_style_catalog()
+        ),
+    ]
+    script = r'''
+const fs = require("fs"), vm = require("vm"), root = process.argv[1];
+const keys = JSON.parse(process.argv[2]);
+const context = {window:{FMODDI18nModules:[]}, document:{documentElement:{dataset:{}}, querySelector:()=>null, dispatchEvent:()=>{}}, NodeFilter:{SHOW_TEXT:4}, CustomEvent:class CustomEvent {}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(root + "/web/i18n.world.js", "utf8"), context);
+vm.runInContext(fs.readFileSync(root + "/web/i18n.js", "utf8"), context);
+const i18n = context.window.FMODDI18n;
+const out = {};
+for (const locale of ["en-GB", "zh-CN", "ko-KR"]) {
+  i18n.setLocale(locale, {persist:false, root:null});
+  out[locale] = Object.fromEntries(keys.map((key) => [key, i18n.t(key)]));
+}
+console.log(JSON.stringify(out));
+'''
+    result = subprocess.run(
+        ["node", "-e", script, str(ROOT), json.dumps(keys)], check=True,
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    catalogs = json.loads(result.stdout)
+    for locale, catalog in catalogs.items():
+        for key, value in catalog.items():
+            assert value and value != key, (locale, key)
 
 
 def test_world_player_editor_renderers_use_semantic_copy_and_keep_raw_values() -> None:

@@ -34,6 +34,7 @@ from tools.player_details_fm24 import (
     BONUS_AND_CLAUSE_NAMES, NATIONALITY_INFO_NAMES,
     read_fm24_asking_price, read_fm24_extended_player,
 )
+from tools.player_attribute_builder import attribute_style_catalog
 from tools.player_details_fm26 import read_fm26_asking_price, read_fm26_extended_player
 from tools.player_rca import (
     FM24_RCA_MODEL, FM26_RCA_MODEL,
@@ -6833,6 +6834,7 @@ def read_world_player_profile(player_id: int) -> dict[str, Any]:
         attach_retirement_details(reader, [player])
         editor_options: dict[str, Any] = {
             "languages": [], "preferred_moves": [],
+            "attribute_styles": attribute_style_catalog(),
             "nations": [
                 {"id": int(nation_id), "name": str(name)}
                 for nation_id, name in sorted(NATION_NAMES.items(), key=lambda item: str(item[1]))
@@ -6905,7 +6907,21 @@ def read_world_player_profile(player_id: int) -> dict[str, Any]:
                     label: int(value)
                     for label, value in zip(POSITION_NAMES, position_raw)
                 },
+                # The attribute draft solver needs the same bias and CA model
+                # the write path uses, otherwise a preview block would not be
+                # byte-identical to what "save changes" writes.
+                "attribute_display_bias": int(
+                    getattr(layout, "attribute_display_bias", 0) or 0
+                ),
+                "ca_model": (
+                    FM24_RCA_MODEL if layout.key.startswith("fm24")
+                    else FM26_RCA_MODEL if layout.key.startswith("fm26")
+                    else ""
+                ),
                 "capabilities": {
+                    "goalkeeper": (
+                        bool(max(position_raw)) and position_raw[0] == max(position_raw)
+                    ),
                     "date_of_birth": layout.person_date_of_birth_offset is not None,
                     "height_cm": layout.player_height_offset is not None,
                     "weight_kg": layout.player_weight_offset is not None,

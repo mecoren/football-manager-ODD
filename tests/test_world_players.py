@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import struct
 import threading
 from types import SimpleNamespace
@@ -1451,3 +1451,114 @@ def test_world_player_person_relation_removes_matching_child_record():
 
     assert result["removed"] is True
     assert reader.bytes(container, 24) == struct.pack("<QQQ", begin, begin, capacity)
+
+
+def _attribute_draft_state():
+    return SimpleNamespace(
+        lock=threading.RLock(),
+        memory_lock=threading.RLock(),
+        output={"save_instance_id": "save-a"},
+        _has_verified_save=lambda: True,
+        _data_scope_id=lambda _output: "scope-a",
+        _timed_user_memory_operation=lambda _label: nullcontext(),
+    )
+
+
+def _attribute_draft_player(positions=None, *, ca=120, pa=160):
+    raw = bytes([50] * 54)
+    editor_positions = {name: 1 for name in fm_odds_web.POSITION_NAMES}
+    editor_positions.update(positions or {})
+    return {
+        "id": 7, "name": "测试球员", "ca": ca, "pa": pa,
+        "attributes": {
+            group: {name: 10 for name in fields.values()}
+            for group, fields in club_reader.OUTFIELD_ATTRIBUTE_GROUPS.items()
+        },
+        "editor": {
+            "positions": editor_positions,
+            "attribute_display_bias": 0,
+            "ca_model": "fm26-verified-rca-v1",
+            "expected_raw": {"attributes": raw.hex()},
+            "capabilities": {"goalkeeper": False},
+        },
+    }
+
+
+def test_world_player_attribute_draft_is_registered_and_not_a_write_route():
+    source = (ROOT / "fm_odds_web.py").read_text(encoding="utf-8")
+    assert (
+        '"/api/world-players/attribute-draft": "preview_world_player_attribute_draft"'
+        in source
+    )
+    body = source.split("def preview_world_player_attribute_draft", 1)[1].split(
+        "\n    def ", 1,
+    )[0]
+    assert "build_player_attribute_draft(" in body
+    assert "read_world_player_profile(" in body
+    # A draft is a read-only plan; the edit-mode gate belongs to the writers.
+    assert "_require_edit_mode" not in body
+
+
+def test_world_player_attribute_draft_hits_the_requested_ca(monkeypatch):
+    player = _attribute_draft_player({"ST": 20})
+    monkeypatch.setattr(fm_odds_web, "read_world_player_profile", lambda _id: player)
+    monkeypatch.setattr(fm_odds_web, "set_active_save_id", lambda *_a, **_k: None)
+
+    response = fm_odds_web.LocalOddsState.preview_world_player_attribute_draft(
+        _attribute_draft_state(),
+        {"player_id": 7, "target_ca": 140, "style": "technical"},
+    )
+
+    draft = response["draft"]
+    assert response["data_scope_id"] == "scope-a"
+    assert draft["hit"] is True
+    assert draft["formula_ca"] == 140
+    assert draft["position_key"] == 9
+    assert draft["position_key_name"] == "ST"
+    assert draft["style"] == "technical"
+    assert draft["attributes"]["技术:传球"] == {
+        "before": 10, "after": draft["attributes"]["技术:传球"]["after"],
+    }
+    assert set(draft["attributes"]) == {
+        f"{group}:{name}"
+        for group, fields in club_reader.OUTFIELD_ATTRIBUTE_GROUPS.items()
+        for name in fields.values()
+    }
+    assert draft["warnings"] == []
+
+
+def test_world_player_attribute_draft_refuses_a_stale_attribute_block(monkeypatch):
+    player = _attribute_draft_player({"ST": 20})
+    monkeypatch.setattr(fm_odds_web, "read_world_player_profile", lambda _id: player)
+    monkeypatch.setattr(fm_odds_web, "set_active_save_id", lambda *_a, **_k: None)
+
+    with pytest.raises(ValueError, match="已在游戏内变化"):
+        fm_odds_web.LocalOddsState.preview_world_player_attribute_draft(
+            _attribute_draft_state(),
+            {"player_id": 7, "target_ca": 140, "expected_raw": "00" * 54},
+        )
+
+
+def test_world_player_attribute_draft_warns_when_the_target_exceeds_pa(monkeypatch):
+    player = _attribute_draft_player({"ST": 20}, pa=100)
+    monkeypatch.setattr(fm_odds_web, "read_world_player_profile", lambda _id: player)
+    monkeypatch.setattr(fm_odds_web, "set_active_save_id", lambda *_a, **_k: None)
+
+    response = fm_odds_web.LocalOddsState.preview_world_player_attribute_draft(
+        _attribute_draft_state(), {"player_id": 7, "target_ca": 150},
+    )
+
+    codes = [row["code"] for row in response["draft"]["warnings"]]
+    assert "target_above_pa" in codes
+
+
+def test_world_player_attribute_draft_rejects_an_out_of_range_target(monkeypatch):
+    player = _attribute_draft_player({"ST": 20})
+    monkeypatch.setattr(fm_odds_web, "read_world_player_profile", lambda _id: player)
+    monkeypatch.setattr(fm_odds_web, "set_active_save_id", lambda *_a, **_k: None)
+
+    for target in (0, 201, "abc", None):
+        with pytest.raises(ValueError, match="目标 CA"):
+            fm_odds_web.LocalOddsState.preview_world_player_attribute_draft(
+                _attribute_draft_state(), {"player_id": 7, "target_ca": target},
+            )

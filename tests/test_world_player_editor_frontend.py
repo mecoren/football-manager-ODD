@@ -65,3 +65,48 @@ def test_editor_exposes_busy_status_and_keyboard_focus_without_small_text():
     assert ".world-player-editor-dialog button:focus-visible" in CSS
     assert ".world-player-editor-status > i { animation:none; }" in CSS
     assert ':root[data-theme="dark"] .world-player-editor-status' in DARK_CSS
+
+
+def test_attribute_draft_panel_uses_its_own_hooks_and_previews_through_the_busy_controller():
+    editor = _function_source("openWorldPlayerEditor", "openPlayerEditorFor")
+    for hook in (
+        "data-world-player-draft-style",
+        "data-world-player-draft-ca",
+        "data-world-player-draft-generate",
+        "data-world-player-draft-status",
+    ):
+        assert hook in editor
+    assert 'editor.options?.attribute_styles' in editor
+    # The panel must not reuse the attribute hook, or collectWorldPlayerEdits
+    # would treat the controls as attribute values.
+    panel = editor.split("world-player-editor-draft", 1)[1].split("const nameSection", 1)[0]
+    assert "data-world-player-attribute=" not in panel
+
+    draft = _function_source("generateWorldPlayerAttributeDraft", "openWorldPlayerEditor")
+    endpoint_at = draft.index("/api/world-players/attribute-draft")
+    assert "runWorldPlayerEditorAction(" in draft[max(0, endpoint_at - 180): endpoint_at]
+    assert "expected_raw:player.editor?.expected_raw?.attributes" in draft
+
+
+def test_applying_a_draft_fills_inputs_and_never_rerenders_the_dialog():
+    apply_source = _function_source("applyWorldPlayerAttributeDraft", "generateWorldPlayerAttributeDraft")
+
+    assert 'content.querySelectorAll("[data-world-player-attribute]")' in apply_source
+    assert "input.value = String(Number(row.after))" in apply_source
+    assert 'content.querySelector(\'[data-world-player-field="ca"]\')' in apply_source
+    assert 'input.dataset.draftChanged = "true"' in apply_source
+    assert 'uiText("world.editor.draft_applied"' in apply_source
+    assert 'uiText("world.editor.draft_missed"' in apply_source
+    # A re-render would overwrite the values that were just filled in, because
+    # the diff still compares against the snapshot taken when the dialog opened.
+    for forbidden in ("openWorldPlayerEditor(", "applyWorldPlayerEditorResponse(", "openClubDetail("):
+        assert forbidden not in apply_source
+
+
+def test_attribute_draft_panel_keeps_text_readable_in_both_themes():
+    assert ".world-player-editor-draft{" in CSS
+    assert ".world-player-editor-draft-status" in CSS
+    assert '[data-draft-changed="true"]' in CSS
+    assert ':root[data-theme="dark"] .world-player-editor-draft select' in DARK_CSS
+    assert ':root[data-theme="dark"] .world-player-editor-draft-status[data-hit="false"]' in DARK_CSS
+    assert ':root[data-theme="dark"] .world-player-editor-field input[data-draft-changed="true"]' in DARK_CSS

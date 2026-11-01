@@ -143,7 +143,7 @@ from tools.club_reader import (
     BREAKTHROUGH_PA_LIMITS, COACHING_LICENSE_NAMES, COACHING_LICENSE_NEXT,
     COACHING_STAFF_JOB_TYPES,
     LATENT_DRAGON_PA_LIMITS,
-    PITCH_TYPE_NAMES, REALLOCATION_ATTRIBUTE_LIMITS, VISIBLE_ATTRIBUTE_IDS,
+    PITCH_TYPE_NAMES, POSITION_NAMES, REALLOCATION_ATTRIBUTE_LIMITS, VISIBLE_ATTRIBUTE_IDS,
     adjust_player_training_condition, apply_fake_marrow_pill,
     develop_player, develop_player_hidden_attribute, develop_player_position,
     estimate_player_training_ca,
@@ -192,6 +192,7 @@ from tools.club_reader import (
     upgrade_human_manager_coaching_license,
     upgrade_staff_coaching_license,
 )
+from tools.player_attribute_builder import build_player_attribute_draft
 from tools.club_legacy import (
     WORLD_WATCH_TEAM_ID,
     add_club_legacy_match_moment,
@@ -13144,6 +13145,69 @@ class LocalOddsState:
             "ready": True, "data_scope_id": scope_id, "player": player,
         }
 
+    def preview_world_player_attribute_draft(
+        self, payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return a CA-consistent attribute draft without touching memory.
+
+        This is a read-only plan, so it deliberately skips the edit-mode gate
+        the write endpoints carry: nothing is written here. The draft is built
+        from the same live block the editor's optimistic lock will send back,
+        which is why a stale snapshot is refused instead of silently planned.
+        """
+        player_id = int(payload.get("player_id") or 0)
+        if player_id <= 0:
+            raise ValueError("球员编号无效")
+        try:
+            target_ca = int(payload.get("target_ca"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("目标 CA 必须是 1 至 200 的整数") from error
+        if not 1 <= target_ca <= 200:
+            raise ValueError("目标 CA 必须是 1 至 200 的整数")
+        style = str(payload.get("style") or "balanced")
+        expected_raw = str(payload.get("expected_raw") or "")
+        with self.lock:
+            if not self._has_verified_save():
+                raise ValueError("请先连接当前存档")
+            scope_id = self._data_scope_id(self.output)
+            set_active_save_id(scope_id)
+        with self._timed_user_memory_operation("world_player_attribute_draft"):
+            player = read_world_player_profile(player_id)
+            editor = player.get("editor") or {}
+            live_raw = str((editor.get("expected_raw") or {}).get("attributes") or "")
+            if len(live_raw) != 108:
+                raise ValueError("当前版本尚未映射球员属性，无法生成")
+            if expected_raw and expected_raw != live_raw:
+                raise ValueError("球员属性已在游戏内变化，请重新打开详情")
+            positions = tuple(
+                int((editor.get("positions") or {}).get(name, 0))
+                for name in POSITION_NAMES
+            )
+            live_attributes = player.get("attributes") or {}
+            writable: dict[int, str] = {}
+            for group, values in live_attributes.items():
+                for name in values or {}:
+                    key = f"{group}:{name}"
+                    attribute_id = VISIBLE_ATTRIBUTE_IDS.get(key)
+                    if attribute_id is not None:
+                        writable[int(attribute_id)] = key
+            draft = build_player_attribute_draft(
+                bytes.fromhex(live_raw), positions, target_ca,
+                style=style,
+                display_bias=int(editor.get("attribute_display_bias") or 0),
+                writable=writable,
+                model=str(editor.get("ca_model") or ""),
+            )
+        pa = int(player.get("pa") or 0)
+        if target_ca > pa:
+            draft["warnings"].append({
+                "code": "target_above_pa", "params": {"pa": pa},
+            })
+        return {
+            "ready": True, "data_scope_id": scope_id,
+            "player_id": player_id, "draft": draft,
+        }
+
     def update_world_player_name(self, payload: dict[str, Any]) -> dict[str, Any]:
         player_id = int(payload.get("player_id") or 0)
         with self.lock:
@@ -22834,6 +22898,7 @@ def build_api_routes() -> RouteRegistry:
         "/api/world-clubs/group-name": "rename_owned_group",
         "/api/world-players/name": "update_world_player_name",
         "/api/world-players/edit": "edit_world_player",
+        "/api/world-players/attribute-draft": "preview_world_player_attribute_draft",
         "/api/world-players/names": "edit_world_player_names",
         "/api/world-players/contract": "edit_world_player_contract",
         "/api/world-players/language": "edit_world_player_language",

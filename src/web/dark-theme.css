@@ -589,6 +589,10 @@
 :root[data-theme="dark"] :is(.world-player-row:hover,.world-player-row:focus-visible,.world-nation-ranking-state button:hover) { background:var(--night-surface-3); }
 :root[data-theme="dark"] :is(.world-player-editor-field input,.world-nation-ranking-state,.portfolio-youth-selector select,.portfolio-brand-selector select) { background:var(--night-surface-0); border-color:var(--night-line); color:var(--night-copy); }
 :root[data-theme="dark"] .world-player-editor-actions { background:var(--night-surface-0); border-color:var(--night-line-soft); }
+:root[data-theme="dark"] .world-player-editor-draft select { background:var(--night-surface-0); border-color:var(--night-line); color:var(--night-copy); }
+:root[data-theme="dark"] .world-player-editor-draft-status[data-hit="true"] { color:#9ed8bf; }
+:root[data-theme="dark"] .world-player-editor-draft-status[data-hit="false"] { color:#e2b878; }
+:root[data-theme="dark"] .world-player-editor-field input[data-draft-changed="true"] { border-color:#8a7a3f; background:#3a3423; color:var(--night-copy); }
 
 /* Activity, relationship and training pickers. */
 :root[data-theme="dark"] :is(

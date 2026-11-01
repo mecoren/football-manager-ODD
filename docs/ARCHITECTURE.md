@@ -117,6 +117,7 @@ JSON 业务路由以 `build_api_routes()` 注册表为唯一分派来源；`Hand
 | 玩家执教俱乐部历史转会投影 | `src/tools/transfer_history.py`；FM26 精确 Steam build 与 FM24 精确 Epic build 的原生归档读取复用 `src/tools/future_transfers.py` 的 TransferManager 定位和各自版本门禁，永久人物事实与人工补录金额仍分别由 `src/tools/club_legacy.py` 的生涯/经理账户容器持有 |
 | 俱乐部关系 | `src/tools/club_affiliations.py` |
 | 董事会愿景 | `src/tools/club_vision.py`、`src/tools/board_listens_hook.py` |
+| 球员编辑器的属性草案 | `src/tools/player_attribute_builder.py`；按目标 CA、位置权重和风格做纯计算，只读入 54 字节属性块与 15 字节位置块，不读写进程、不持有偏移 |
 
 世界俱乐部的规范化目录、地区分面、同名消歧、声望排名和分页索引由 `src/tools/world_clubs.py` 负责；`LocalOddsState` 只编排存档/账户作用域与单实例派生缓存。目录中的地址始终只是会话提示，收购报价、成员核验和所有原生写入仍须走目标读取与事务校验，不能把目录投影当作 FM 地址或账户真值。`src/tools/database_index.py` 提供 FMRTE 风格的会话级 Team/Club/Nation 对象重定位：优先按稳定 UID 取得当前地址，随后校验 Team/Club vtable 与 Team→Club 关联；预备队/B 队的 Club UID 可与 Team UID 不同，不能用该相等关系误拒绝合法对象。索引暂时不可用时才使用已验证的调用方地址，不持久化裸地址。
 
