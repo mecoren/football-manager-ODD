@@ -195,6 +195,18 @@ class EditModeFrontendContractTests(unittest.TestCase):
         self.assertIn("/api/settings/edit-mode", self.script)
         self.assertIn('$("#edit-mode")?.addEventListener("change"', self.script)
 
+    def test_the_switch_is_on_the_default_tab_and_reachable_from_a_profile(self) -> None:
+        groups = self.script.split("const SETTINGS_TAB_GROUPS", 1)[1].split(
+            "function activateSettingsTab", 1,
+        )[0]
+        general = groups.split('key:"general"', 1)[1].split('key:"markets"', 1)[0]
+        self.assertIn('".edit-mode-setting"', general)
+        # "general" is the tab the dialog opens on by default, so the switch is
+        # visible without hunting. A toast alone is still not enough - the dialog
+        # restores the last used tab, so the profile button opens the right one.
+        self.assertIn("function openSettingsWithTab(tabKey)", self.script)
+        self.assertIn('openSettingsWithTab("general");', self.script)
+
     def test_the_profile_button_only_appears_while_the_mode_is_on(self) -> None:
         self.assertIn("function editModeEnabled()", self.script)
         self.assertIn("kind === \"player\" && editModeEnabled()", self.script)

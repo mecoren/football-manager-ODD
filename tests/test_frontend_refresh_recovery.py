@@ -303,13 +303,20 @@ class FrontendRefreshRecoveryTests(unittest.TestCase):
             ".full-refresh-setting",
             ".odds-reading-setting", "#championship-enabled",
             ".compact-money-setting", ".profit-loss-color-setting", "#show-hidden-attributes",
-            ".cheat-setting", ".storage-setting", ".support-setting",
+            ".cheat-setting", ".edit-mode-setting", ".storage-setting", ".support-setting",
         ):
             self.assertIn(f'"{selector}"', tabs)
         general = tabs.split('key:"general"', 1)[1].split('key:"markets"', 1)[0]
         markets = tabs.split('key:"markets"', 1)[1].split('key:"display"', 1)[0]
+        cheats = tabs.split('key:"cheats"', 1)[1].split('key:"operations"', 1)[0]
         self.assertIn('".full-refresh-setting"', general)
         self.assertNotIn('".full-refresh-setting"', markets)
+        # Anything the groups do not claim is swept into "general", and the
+        # dialog reopens on the tab used last. Edit mode was left unclaimed once,
+        # which is invisible to anyone whose last tab was not "general" - pin the
+        # group explicitly instead of trusting the fallback.
+        self.assertIn('".edit-mode-setting"', general)
+        self.assertNotIn('".edit-mode-setting"', cheats)
         self.assertIn("ensureSettingsTabs();", startup)
         self.assertLess(startup.index("ensureSettingsTabs();"), startup.index("bindEvents();"))
         self.assertIn(".settings-tabs { position:sticky; top:0;", self.css)

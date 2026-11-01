@@ -25564,12 +25564,30 @@ async function saveWorldPlayerNames(player, options = {}) {
   } catch (error) { toast(error.message || uiText("world.editor.names_failed")); }
 }
 
+// The settings dialog reopens on whichever tab was used last, so a toast that
+// says "turn on edit mode first" can point at a tab that does not show it.
+// Opening the dialog on the tab that holds the switch makes it actionable.
+function openSettingsWithTab(tabKey) {
+  const dialog = $("#settings-dialog");
+  if (!dialog) return;
+  if (!dialog.open) {
+    render();
+    renderSettingsControls({force:true});
+    dialog.showModal();
+    renderIcons(dialog);
+    renderOperationRecords({visibleOnly:true});
+    loadStorageInfo();
+  }
+  activateSettingsTab(tabKey);
+}
+
 function openWorldPlayerEditor(player, options = {}) {
   const dialog = $("#world-player-editor-dialog");
   const editor = player?.editor || {};
   if (!dialog || !player || !editor.expected_raw) return;
   if (!editModeEnabled()) {
     toast(uiText("settings.edit_mode_required"));
+    openSettingsWithTab("general");
     return;
   }
   app.worldPlayerEditorPlayer = player;
@@ -25665,6 +25683,7 @@ function openWorldPlayerEditor(player, options = {}) {
 async function openPlayerEditorFor(person, options = {}) {
   if (!editModeEnabled()) {
     toast(uiText("settings.edit_mode_required"));
+    openSettingsWithTab("general");
     return;
   }
   if (person?.editor?.expected_raw) {
@@ -29022,8 +29041,14 @@ function renderOperationRecords({visibleOnly = false} = {}) {
 const SETTINGS_TAB_GROUPS = [
   {
     key:"general", labelKey:"settings.tabs.general",
+    // Panel order follows this list, not the DOM, so edit mode sits high up
+    // instead of trailing the support block. It is pinned explicitly rather
+    // than left to the fallback sweep: "general" is the tab that opens by
+    // default, and a switch nobody can find is the same as one that does not
+    // exist.
     selectors:[
-      ".money-currency-setting", ".save-account-setting", ".full-refresh-setting",
+      ".money-currency-setting", ".edit-mode-setting", ".save-account-setting",
+      ".full-refresh-setting",
       ".portrait-source-setting", ".storage-setting", ".update-setting", ".support-setting", ".author-update-note",
     ],
   },
