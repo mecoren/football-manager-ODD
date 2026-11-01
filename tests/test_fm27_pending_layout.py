@@ -443,8 +443,16 @@ class FM27PendingLayoutTests(unittest.TestCase):
         # counters belong here too - 0x3C0/0x3C1 are not them (42% of players
         # over 23 read non-zero there and the mean rises with age, the opposite
         # of a U21 counter), and read_fm26_international_stats returns None
-        # unless all four offsets are present, so the confirmed senior pair at
+        # unless all four offsets are present, so the senior pair at
         # 0x3BC/0x3BE has to stay unset with them rather than half-publish.
+        # Round 119 tried the save's archived INTERNATIONAL rows as an oracle
+        # for the senior pair and they do not qualify: one stat line can appear
+        # under several kinds, transfer splits repeat it, the rows carry the
+        # player's club rather than a national team, and 347 of 2881 joined
+        # players read fewer caps live than the archive claims - an impossible
+        # result for a career counter. The age profile of those rows still says
+        # they are senior internationals, so the archive is the unreliable side,
+        # but that leaves the pair named by behaviour only.
         for name in (
             "player_career_stats_offset",
             "player_international_appearances_offset",

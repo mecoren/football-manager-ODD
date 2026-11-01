@@ -1527,6 +1527,37 @@ FM27_LAYOUT = GameLayout(
     #     U21 counter. A scan of every u8 and u16 in player 0x3A0..0x3C7 found no
     #     candidate that is non-zero for 17..22-year-olds and zero afterwards,
     #     so FM27 does not keep the U21 pair in the person block at all.
+    # Round 119 tried to settle the pair from the save instead, and that route
+    # is closed for reasons worth recording so nobody retries it.
+    # player_season_history DOES hold 17497 rows with kind INTERNATIONAL, but:
+    #   * 15.9% of player-seasons repeat one identical (starts, subs, goals,
+    #     minutes) line under more than one kind, so a kind is not a partition;
+    #   * a mid-season transfer splits a season into two team blocks that repeat
+    #     the same numbers (Donnarumma 2034: Manchester City and Aston Villa,
+    #     both 10/0/0/930), and the "missing reference" sentinel rows repeat the
+    #     neighbouring season's line verbatim;
+    #   * the team reference on those rows resolves to the player's CLUB, so a
+    #     row cannot be attributed to a national team at all;
+    #   * summing over-counts the young (a 2011-born player shows 61 against 36
+    #     live) and under-counts anyone whose caps predate the save's first
+    #     season, so both signs of residual appear at once.
+    # Joined uid -> unique_id -> memory uid over 2881 players, the sum equals
+    # 0x3BC for 785 (27.2%, null model 2.7%) and memory >= the sum for 88.0% -
+    # real signal, but a career counter must satisfy that for all of them and
+    # 347 rows break the one-sided test. The age profile of the rows (mean 2.0
+    # appearances at 16 rising to 7.1 at 30) says they ARE senior
+    # internationals, so the disagreement belongs to the archive.
+    # Conclusion: the save is an anomaly detector for this field, not an oracle,
+    # and the quartet stays unset rather than being half-published on "looks
+    # about right". The one route not yet tried is save.player_match_stats(),
+    # which holds one row per match instead of per season and therefore cannot
+    # double count: summing a player's international matches would give a
+    # clean lower bound, and "live caps >= that bound" should then hold for
+    # every player. It carries its own limit - fmsave documents that match
+    # histories may be truncated - but truncation only ever lowers the bound,
+    # which is the safe direction for a one-sided test. It needs a way to tell
+    # an international competition from a club one, and the save stores no
+    # competition names, so that is where the next attempt starts.
     # player_details_fm26.read_fm26_international_stats returns None unless ALL
     # FOUR offsets are present, so declaring only the senior pair would publish
     # nothing while creating the impression of a mapped feature. All four stay
