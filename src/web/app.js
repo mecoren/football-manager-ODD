@@ -25362,6 +25362,9 @@ function applyWorldPlayerEditorResponse(response, options = {}) {
 
 async function saveWorldPlayerLanguage(player, languageId, targetLevel, options) {
   if (app.worldPlayerEditorBusy) return;
+  const levelInput = $(`[data-world-player-language-level="${Number(languageId)}"]`) || $("#world-player-new-language-level");
+  const levelIssues = worldPlayerEditorFieldIssues(levelInput).map((issue) => ({...issue, input:levelInput}));
+  if (worldPlayerEditorReportIssues({family:"language", errors:levelIssues, warnings:[]})) return;
   if (!await fmoddConfirm(`${uiText("world.editor.confirm_language", {player:player.name, level:targetLevel})}${uiText("world.editor.memory_warning")}`, uiText("world.editor.confirm_language_title"))) return;
   try {
     const response = await runWorldPlayerEditorAction(uiText("world.editor.busy_language"), () => request("/api/world-players/language", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id:Number(player.id),language_id:Number(languageId),target_level:Number(targetLevel)})}));
@@ -25525,6 +25528,7 @@ async function saveWorldPlayerContract(player, options = {}) {
       contract_bonuses: player.editor?.expected_raw?.contract_bonuses || "",
     };
   }
+  if (worldPlayerEditorGate("contract")) return;
   if (!Object.keys(changes).length) {
     toast(uiText("world.editor.contract_no_changes"));
     return;
@@ -25551,6 +25555,7 @@ async function saveWorldPlayerNames(player, options = {}) {
     if (before != null) expected.names[field] = before;
     if (String(after) !== String(before)) changes[field] = after;
   });
+  if (worldPlayerEditorGate("names")) return;
   if (!Object.keys(changes).length) {
     toast(uiText("world.editor.names_no_changes"));
     return;
@@ -25774,6 +25779,138 @@ async function openPlayerEditorFor(person, options = {}) {
   }
 }
 
+// Every editor save reads its bounds from the inputs that were rendered with
+// the server's own limits, so a new field never needs a second copy of the
+// range table here. Only the rules the DOM cannot express are spelled out.
+const WORLD_PLAYER_EDITOR_ISSUE_SELECTORS = {
+  main: "[data-world-player-field],[data-world-player-position],[data-world-player-attribute],[data-world-player-hidden]",
+  contract: "[data-world-player-contract-field],[data-world-player-contract-bonus-amount],[data-world-player-contract-bonus-number]",
+  names: "[data-world-player-name-field]",
+  language: "[data-world-player-language-level],#world-player-new-language-level",
+};
+// The reader turns these two totals back into 0, so a player given one of them
+// looks available on a free transfer.
+const WORLD_PLAYER_EDITOR_ZERO_PRICE_TOTALS = [300000000, 4294967295];
+const WORLD_PLAYER_EDITOR_DATE_YEARS = {min:1900, max:2200};
+const WORLD_PLAYER_EDITOR_TEXT_ENCODER = new TextEncoder();
+
+function worldPlayerEditorIssueLabel(input) {
+  const text = String(input?.closest("label")?.querySelector("span")?.textContent || "").trim();
+  if (text) return text;
+  return String(input?.dataset?.worldPlayerField || input?.dataset?.worldPlayerContractField || input?.dataset?.worldPlayerNameField || "");
+}
+
+function worldPlayerEditorInputDirty(input) {
+  if (!input || !["number", "date", "text"].includes(input.type)) return false;
+  return String(input.value) !== String(input.defaultValue);
+}
+
+function worldPlayerEditorFieldIssues(input) {
+  if (!input || !["number", "date", "text"].includes(input.type)) return [];
+  const field = worldPlayerEditorIssueLabel(input);
+  // A half-typed date or number reports an empty value together with badInput,
+  // so an empty box only means "cleared" once badInput has been ruled out.
+  if (input.validity?.badInput) return [{code:"required", params:{field}}];
+  const text = String(input.value);
+  if (input.type === "date") {
+    if (!text) {
+      return input.dataset.worldPlayerField === "date_of_birth" ? [{code:"required", params:{field}}] : [];
+    }
+    const year = Number(text.slice(0, 4));
+    const {min, max} = WORLD_PLAYER_EDITOR_DATE_YEARS;
+    if (!Number.isInteger(year) || year < min || year > max) {
+      return [{code:"date_range", params:{field, min, max}}];
+    }
+    return [];
+  }
+  if (input.type === "text") {
+    if (!text.trim()) return [{code:"required", params:{field}}];
+    // Native name strings are rewritten in place, so the stored byte count is
+    // part of the contract and a longer or shorter name cannot be written.
+    const bytes = WORLD_PLAYER_EDITOR_TEXT_ENCODER.encode(String(input.defaultValue)).length;
+    if (WORLD_PLAYER_EDITOR_TEXT_ENCODER.encode(text).length !== bytes) {
+      return [{code:"name_length", params:{field, bytes}}];
+    }
+    return [];
+  }
+  if (!text) return [{code:"required", params:{field}}];
+  const value = Number(text);
+  if (!Number.isFinite(value)) return [{code:"integer", params:{field}}];
+  const minimum = input.min === "" ? null : Number(input.min);
+  const maximum = input.max === "" ? null : Number(input.max);
+  if ((minimum !== null && value < minimum) || (maximum !== null && value > maximum)) {
+    return [{code:"range", params:{field, min:minimum ?? "", max:maximum ?? ""}}];
+  }
+  const digits = (input.getAttribute("step") || "1").split(".")[1]?.length || 0;
+  const scaled = value * (10 ** digits);
+  if (Math.abs(scaled - Math.round(scaled)) > 1e-6) {
+    return [digits ? {code:"decimals", params:{field, digits}} : {code:"integer", params:{field}}];
+  }
+  return [];
+}
+
+function worldPlayerEditorIssues(family) {
+  const content = $("#world-player-editor-content");
+  const errors = [];
+  const warnings = [];
+  const selector = WORLD_PLAYER_EDITOR_ISSUE_SELECTORS[family];
+  if (!content || !selector) return {family, errors, warnings};
+  content.querySelectorAll(selector).forEach((input) => {
+    if (!worldPlayerEditorInputDirty(input)) return;
+    worldPlayerEditorFieldIssues(input).forEach((issue) => errors.push({...issue, input}));
+  });
+  if (family !== "main") return {family, errors, warnings};
+  const ca = content.querySelector('[data-world-player-field="ca"]');
+  const pa = content.querySelector('[data-world-player-field="pa"]');
+  const pairBlocked = errors.some((row) => row.input === ca || row.input === pa);
+  if (ca && pa && !pairBlocked && (worldPlayerEditorInputDirty(ca) || worldPlayerEditorInputDirty(pa))
+    && Number(ca.value) > Number(pa.value)) {
+    warnings.push({code:"warn_ca_pa", params:{ca:Number(ca.value), pa:Number(pa.value)}, input:pa});
+  }
+  const price = content.querySelector('[data-world-player-field="asking_price"]');
+  if (price && worldPlayerEditorInputDirty(price)
+    && WORLD_PLAYER_EDITOR_ZERO_PRICE_TOTALS.includes(Number(price.value))) {
+    warnings.push({code:"warn_asking_price", params:{value:Number(price.value)}, input:price});
+  }
+  return {family, errors, warnings};
+}
+
+function worldPlayerEditorReportIssues(issues, options = {}) {
+  const content = $("#world-player-editor-content");
+  if (!content) return false;
+  const errors = issues?.errors || [];
+  const warnings = issues?.warnings || [];
+  content.querySelector("[data-world-player-editor-issues]")?.remove();
+  content.querySelectorAll('[aria-invalid="true"]').forEach((node) => node.removeAttribute("aria-invalid"));
+  errors.forEach((row) => row.input?.setAttribute("aria-invalid", "true"));
+  if (!errors.length && !warnings.length) return false;
+  const item = (row) => `<li>${escapeHtml(uiText(`world.editor.validation.${row.code}`, row.params || {}))}</li>`;
+  const heading = errors.length
+    ? `<strong>${escapeHtml(uiText("world.editor.validation.summary", {count:errors.length}))}</strong><ul>${errors.map(item).join("")}</ul>`
+    : "";
+  const warnBlock = warnings.length ? `<ul class="world-player-editor-issues-warn">${warnings.map(item).join("")}</ul>` : "";
+  content.insertAdjacentHTML("afterbegin", `<div class="world-player-editor-issues" data-world-player-editor-issues="${escapeHtml(String(issues?.family || ""))}" role="alert">${heading}${warnBlock}</div>`);
+  const first = errors[0]?.input;
+  if (first && options.focus !== false) {
+    first.scrollIntoView({block:"center"});
+    first.focus();
+  }
+  return errors.length > 0;
+}
+
+function worldPlayerEditorGate(family, options = {}) {
+  return worldPlayerEditorReportIssues(worldPlayerEditorIssues(family), options);
+}
+
+// Typing only ever clears or adds a mark, so the summary is recomputed from the
+// family it was raised for instead of re-running the whole dialog.
+function worldPlayerEditorIssueInput(event) {
+  const content = $("#world-player-editor-content");
+  const block = content?.querySelector("[data-world-player-editor-issues]");
+  if (!block || !event?.target?.closest?.(".world-player-editor-content")) return;
+  worldPlayerEditorReportIssues(worldPlayerEditorIssues(block.dataset.worldPlayerEditorIssues), {focus:false});
+}
+
 function collectWorldPlayerEdits(player) {
   const content = $("#world-player-editor-content");
   const changes = {};
@@ -25820,6 +25957,7 @@ async function saveWorldPlayerEditor(event) {
   const options = app.worldPlayerEditorOptions || {};
   if (!player) return;
   const {changes, expected} = collectWorldPlayerEdits(player);
+  if (worldPlayerEditorGate("main")) return;
   if (!Object.keys(changes).length) {
     toast(uiText("world.editor.no_changes"));
     return;
@@ -29258,6 +29396,7 @@ function bindEvents() {
     if (event.target.closest("[data-global-career-retry]")) loadGlobalCareerStatistics();
   });
   $("#world-player-editor-form")?.addEventListener("submit", saveWorldPlayerEditor);
+  $("#world-player-editor-content")?.addEventListener("input", worldPlayerEditorIssueInput);
   $("[data-close-world-player-editor]")?.addEventListener("click", () => $("#world-player-editor-dialog")?.close());
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !app.trainingPlayerPickerOpen) return;

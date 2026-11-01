@@ -593,6 +593,10 @@
 :root[data-theme="dark"] .world-player-editor-draft-status[data-hit="true"] { color:#9ed8bf; }
 :root[data-theme="dark"] .world-player-editor-draft-status[data-hit="false"] { color:#e2b878; }
 :root[data-theme="dark"] .world-player-editor-field input[data-draft-changed="true"] { border-color:#8a7a3f; background:#3a3423; color:var(--night-copy); }
+:root[data-theme="dark"] .world-player-editor-issues { border-color:#6d3b36; border-left-color:#d37164; background:#33221f; color:#f0c9c2; }
+:root[data-theme="dark"] .world-player-editor-issues strong { color:#f0c9c2; }
+:root[data-theme="dark"] .world-player-editor-issues-warn { background:#3a3423; color:#e2b878; }
+:root[data-theme="dark"] .world-player-editor-dialog input[aria-invalid="true"] { border-color:#d37164; background:#3a2422; color:var(--night-copy); }
 
 /* Activity, relationship and training pickers. */
 :root[data-theme="dark"] :is(
