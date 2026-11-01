@@ -1385,10 +1385,66 @@ FM27_LAYOUT = GameLayout(
     #     0x22E, CA/PA 0x264/0x266, injury list 0xF8, season-stats root 0x108,
     #     career stats 0x110, sharpness/fatigue/fitness 0x258/0x25A/0x25C,
     #     world reputation 0x262, morale 0x26C.
+    # NOTE ON SCOPE: those two bullets describe where the FIELDS live in the
+    # object, not which ones this layout declares. Four of them are deliberately
+    # left unset - player_career_stats_offset, person_relationships_offset,
+    # person_languages_offset, person_previous_club_offset - because "the qword
+    # lands in the heap" is much weaker evidence than a DOB that decodes to a
+    # real date, and none of them is needed to register FM27. The measurements
+    # for them are still in the audit above so a future attempt does not have to
+    # start over.
     #   - the player subobject vtable is 0x4D27228 (hybrid: 0x4F75A08); it shows
     #     up at person-0x288 (person-0x380) in 100% (99%) of the respective
     #     rows and is what the reader must accept once it is handed a player
     #     pointer rather than a person pointer.
+    # Full-population audit (rounds 109/111): all 17268 ACTUAL_PLAYER rows, no
+    # sampling, read at player = person-0x288. Each field is scored on its own
+    # acceptance test rather than on "looks reasonable":
+    #   positions 0x150        15 bytes in 1..20, peak 20      17268/17268
+    #   attributes 0x15F       54 bytes in 1..100, no zeros    17268/17268
+    #   height 0x22E           150..210                         17268/17268
+    #   CA/PA 0x264/0x266      1..200 with CA<=PA               17268/17268
+    #   sharpness 0x258        0..10000                         17268/17268
+    #   fitness 0x25C          0..10000                         17268/17268
+    #   fatigue 0x25A          0..10000                         14242/17268
+    #   world reputation 0x262 0..10000                         17268/17268
+    #   morale 0x26C           u8 in 1..20, 20 values present   17268/17268
+    #   intl caps/goals        goals<=caps<=300                 17267/17268
+    #   u21 caps/goals (u8)    goals<=caps                      17251/17268
+    #   injury list 0xF8       heap 6797 / null 10471, no junk
+    #   season root 0x108      heap pointer, never null         17268/17268
+    #   career stats 0x110     heap 15262 / null 2006
+    #   person fields          first/last name, nationality, DOB and
+    #                          relationships 99..100% non-null; languages 48.7%
+    #                          and previous club 50.0% (both genuinely optional)
+    # Morale is the one field where the READ WIDTH decides the result: the u16
+    # at 0x26C is inside 1..20 for only 24.18% of rows, while the consumer's u8
+    # read is 17268/17268. Never "fix" it by widening.
+    # A three-version diff (round 111) puts the whole block in context: FM27
+    # shares all 34 of its player/person offsets with FM26 and NONE with FM24
+    # (FM24 keeps positions/attributes at 0x208/0x217, height at 0x14E and
+    # CA/PA at 0x200/0x202), so the row really is FM26's layout behind an
+    # FM26-sized person prefix, and the round-25 hoist rule left no stray number
+    # anywhere in the object. The only two deliberate divergences are fatigue
+    # (unset) and attribute_display_bias (3 here, 0 in both other versions).
+    # International counters (rounds 112/113) are the one place where an offset
+    # can be NAMED by behaviour instead of by range, and the answer is split:
+    #   * 0x3BC/0x3BE (u16 caps, u16 goals) are the senior caps/goals pair.
+    #     Caps are 0 for 100% of 16-year-olds, 96% of 18-year-olds, 43% of
+    #     34-year-olds and 11% of 38-year-olds; goals<=caps holds 17267/17268
+    #     and caps==0 implies goals==0 in 17268/17268. That age gradient is not
+    #     something a wrong offset reproduces by accident.
+    #   * 0x3C0/0x3C1, which is where FM26 keeps its U21 pair, are NOT U21
+    #     counters: 42% of players over 23 read non-zero there and the mean
+    #     RISES with age (1.87 under 20 vs 5.26 at 24+), the exact opposite of a
+    #     U21 counter. A scan of every u8 and u16 in player 0x3A0..0x3C7 found no
+    #     candidate that is non-zero for 17..22-year-olds and zero afterwards,
+    #     so FM27 does not keep the U21 pair in the person block at all.
+    # player_details_fm26.read_fm26_international_stats returns None unless ALL
+    # FOUR offsets are present, so declaring only the senior pair would publish
+    # nothing while creating the impression of a mapped feature. All four stay
+    # unset together; the senior pair is recorded here so the next attempt
+    # starts from 0x3BC rather than re-deriving it.
     # Measured over 120 rows against the OLD (shifted) base, so these numbers
     # describe the neighbouring row and are kept only as history: morale 1..20,
     # sharpness 3500..10000, fitness 6100..10000, world reputation 1925..8676,
@@ -1550,7 +1606,17 @@ FM27_LAYOUT = GameLayout(
     player_attributes_offset=0x15F,
     player_height_offset=0x22E,
     # Person-relative, so the person subobject keeps the FM26 values.
+    #
+    # flags 0x18 is a packed bitfield, NOT a pointer: the qwords read
+    # 0x00000004104002xx / 0x00000004304002xx / 0x0000000510400200 across the
+    # whole population. Bit 0x1000, which the consumer decodes as "female", is
+    # set in 398/17268 = 2.3% of rows - a plausible women's-football share
+    # rather than a coin flip, so the slot is real. (Round 109 first flagged it
+    # as a heap pointer; that was its own bucketing letting a small integer into
+    # the pointer range, not a finding.)
     person_flags_offset=0x18,
+    # Hidden attributes 0x70 is likewise a packed bitfield, read as 8 raw bytes:
+    # never null, never a pointer, values in the 0x...02xx range.
     person_hidden_attributes_offset=0x70,
     # FM26 values, restored with the base. Its companions (total_slot /
     # block_size) are deliberately NOT set: they were never measured, and
@@ -1562,6 +1628,18 @@ FM27_LAYOUT = GameLayout(
     # roster_summary=None path, so leaving any of them None raises
     # "unsupported operand type(s) for +: 'int' and 'NoneType'" (observed live on
     # /api/world-players/detail before these were set).
+    #
+    # 0x262 sits in a run of three adjacent u16s (0x25E, 0x260, 0x262) that are
+    # ALL 0..10000 in 17268/17268 rows, so a range test cannot name any of them.
+    # The naming here rests on two things that can: the slot order FM24 and FM26
+    # share (home, current, world), and the CA-correlation gradient across the
+    # run, which is +0.989 / +0.980 / +0.838 - world reputation is the least
+    # ability-tight of the three and the only one that saturates the scale (max
+    # exactly 10000). Their MEANS run 3881 / 4052 / 2487, i.e. the other way, so
+    # "world reputation must be the biggest" is false and must never be used as
+    # a check. Home (0x25E) and current (0x260) stay unset on purpose: nothing
+    # available here separates those two from each other, and picking one would
+    # be the same species of guess that got the three position fields retracted.
     player_world_reputation_offset=0x262,
     player_sharpness_offset=0x258,
     player_fitness_offset=0x25C,
@@ -1573,7 +1651,10 @@ FM27_LAYOUT = GameLayout(
     # along, and it is not a condition value - sampling 300 live players gives
     # only 192/300 inside 0..10000 (median 90, max 65530), while its neighbours
     # 0x258 (sharpness) and 0x25C (fitness) are 300/300 inside 0..10000. So
-    # FM27's 0x25A is not fatigue either. It must not be guessed because
+    # FM27's 0x25A is not fatigue either. Round 109 re-ran the same test over
+    # all 17268 rows instead of 300: 14242/17268 (82.48%) inside 0..10000,
+    # median 62, max 65535, against 17268/17268 for both neighbours, so the
+    # verdict does not depend on the sample. It must not be guessed because
     # adjust_player_training_condition WRITES u16(address + player_fatigue_offset)
     # and clamps to 0..10000, so a wrong offset would corrupt unrelated bytes.
     # Left None, the write path raises "当前游戏版本尚未完整映射球员身体状态" and

@@ -342,15 +342,103 @@ class FM27PendingLayoutTests(unittest.TestCase):
         self.assertEqual(layout.player_morale_offset, 0x26C)
         self.assertEqual(layout.player_injury_list_offset, 0xF8)
 
+    def test_player_and_person_blocks_are_fm26_offsets_field_for_field(self):
+        """Round 111: FM27's row layout is FM26's, and only FM26's.
+
+        A three-version diff over every shared layout field finds 34 FM27 values
+        that equal FM26's and zero that equal FM24's, so the round-25 "hoist"
+        story left no number behind anywhere, and FM24's genuinely different
+        block (positions 0x208, attributes 0x217, CA 0x200, height 0x14E) was
+        never mixed in. Enumerating the block here means a future edit to one
+        FM27 offset has to confront the comparison instead of drifting silently.
+
+        Also the audit that followed the base fix: reading all 17268
+        ACTUAL_PLAYER rows (no sampling) at player = person-0x288 gives 100% for
+        the 15-byte position matrix (1..20, peak 20), the 54 attribute bytes
+        (1..100, no zeros), height (150..210), CA/PA (1..200 with CA<=PA),
+        sharpness, fitness, world reputation (both 0..10000) and the u8 morale
+        (1..20, all 20 values present).
+        """
+        layout = FM27_LAYOUT
+        reference = FM26_LAYOUT
+        shared = (
+            "player_person_offset",
+            "player_and_non_player_person_offset",
+            "player_positions_offset",
+            "player_attributes_offset",
+            "player_height_offset",
+            "player_ca_offset",
+            "player_pa_offset",
+            "player_ca_bytes",
+            "player_sharpness_offset",
+            "player_fitness_offset",
+            "player_morale_offset",
+            "player_injury_list_offset",
+            "player_season_stats_root_offset",
+            "player_world_reputation_offset",
+            "person_full_name_offset",
+            "person_first_name_offset",
+            "person_last_name_offset",
+            "person_common_name_offset",
+            "person_nationality_offset",
+            "person_date_of_birth_offset",
+            "person_date_of_birth_day_year",
+            "person_hidden_attributes_offset",
+            "person_flags_offset",
+            "person_flags_bytes",
+        )
+        for name in shared:
+            with self.subTest(field=name):
+                self.assertIsNotNone(
+                    getattr(layout, name),
+                    f"FM27 {name} unexpectedly unset",
+                )
+                self.assertEqual(
+                    getattr(layout, name), getattr(reference, name),
+                    f"FM27 {name} no longer matches FM26",
+                )
+        # Measured at the corrected base but deliberately NOT declared: a qword
+        # that lands in the heap is weaker evidence than a DOB that decodes to a
+        # real date, and none of these is needed to register FM27. The U21
+        # counters belong here too - 0x3C0/0x3C1 are not them (42% of players
+        # over 23 read non-zero there and the mean rises with age, the opposite
+        # of a U21 counter), and read_fm26_international_stats returns None
+        # unless all four offsets are present, so the confirmed senior pair at
+        # 0x3BC/0x3BE has to stay unset with them rather than half-publish.
+        for name in (
+            "player_career_stats_offset",
+            "player_international_appearances_offset",
+            "player_international_goals_offset",
+            "player_u21_international_appearances_offset",
+            "player_u21_international_goals_offset",
+            "person_relationships_offset",
+            "person_languages_offset",
+            "person_previous_club_offset",
+        ):
+            with self.subTest(field=name):
+                self.assertIsNone(
+                    getattr(layout, name),
+                    f"FM27 {name} must stay unset until it is verified",
+                )
+                self.assertIsNotNone(getattr(reference, name))
+        # The two deliberate divergences, both measured rather than inherited:
+        # 0x25A fails the 0..10000 test where its neighbours pass it, and the
+        # attribute encoding needs round(raw/5) rather than floor(raw/5).
+        self.assertIsNone(layout.player_fatigue_offset)
+        self.assertEqual(layout.attribute_display_bias, 3)
+        self.assertEqual(reference.attribute_display_bias, 0)
+
     def test_player_fatigue_stays_unset(self):
         """FM27's 0x25A does not hold a condition value.
 
         Sampling 300 live players: only 192/300 fell inside 0..10000 (median 90,
         max 65530), while sharpness 0x258 and fitness 0x25C were 300/300. The
         original measurement was taken at person+0x39A, which round 105 showed
-        is this same 0x25A field one row along. The offset is also WRITTEN by
-        adjust_player_training_condition, so a guess would corrupt unrelated
-        bytes. It must stay None.
+        is this same 0x25A field one row along. Round 109 re-measured it over
+        the whole population at the corrected base: 14242/17268 (82.48%) inside
+        0..10000, median 62, max 65535, while 0x258 and 0x25C are 17268/17268.
+        The offset is also WRITTEN by adjust_player_training_condition, so a
+        guess would corrupt unrelated bytes. It must stay None.
         """
         self.assertIsNone(FM27_LAYOUT.player_fatigue_offset)
 
