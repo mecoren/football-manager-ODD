@@ -158,6 +158,13 @@ class GameLayout:
     player_u21_international_goals_offset: int | None = None
     player_international_counter_width: int = 2
     player_u21_international_counter_width: int = 1
+    # Some builds keep no U21 counter pair at all. Declaring that here lets the
+    # reader publish the senior pair on its own and report the U21 values as
+    # unknown, instead of withholding all four because two of them do not
+    # exist. It is a structural claim about the object, so it is per-layout and
+    # must be backed by an exhaustive scan of the counter window, not by a
+    # missing value.
+    player_u21_international_counters_absent: bool = False
     team_reputation_offset: int | None = None
     # Native db::TEAM squad classification (first team, U21, U18, etc.).
     # Keep disabled for builds where the field has not been verified.
@@ -1558,11 +1565,18 @@ FM27_LAYOUT = GameLayout(
     # which is the safe direction for a one-sided test. It needs a way to tell
     # an international competition from a club one, and the save stores no
     # competition names, so that is where the next attempt starts.
-    # player_details_fm26.read_fm26_international_stats returns None unless ALL
-    # FOUR offsets are present, so declaring only the senior pair would publish
-    # nothing while creating the impression of a mapped feature. All four stay
-    # unset together; the senior pair is recorded here so the next attempt
-    # starts from 0x3BC rather than re-deriving it.
+    # DECISION (round 120): the senior pair is now declared and the U21 pair is
+    # declared absent, instead of withholding all four. The old reasoning - a
+    # reader that needs all four nothing to show if two do not exist - was a
+    # limitation of the reader, not a fact about the build: FM27 keeps no U21
+    # counter in this object (the scan above covers every u8 and u16 in
+    # 0x3A0..0x3C7), so demanding two offsets that cannot exist published
+    # nothing at all. player_u21_international_counters_absent records the
+    # structural claim and read_fm26_international_stats then reports the
+    # senior counters with the U21 values as None, which the profile renders as
+    # "-" rather than 0. The senior pair itself stays behaviour-named rather
+    # than oracle-confirmed: see the round-119 note above, which is why this
+    # declaration ships with a comment instead of a claim of verification.
     # Measured over 120 rows against the OLD (shifted) base, so these numbers
     # describe the neighbouring row and are kept only as history: morale 1..20,
     # sharpness 3500..10000, fitness 6100..10000, world reputation 1925..8676,
@@ -1764,6 +1778,12 @@ FM27_LAYOUT = GameLayout(
     player_fitness_offset=0x25C,
     player_morale_offset=0x26C,
     player_injury_list_offset=0xF8,
+    # Round 120: the senior pair is published, the U21 pair is declared absent
+    # (see the round-112/119 note above). Widths stay at the FM26 values.
+    player_international_appearances_offset=0x3BC,
+    player_international_goals_offset=0x3BE,
+    player_u21_international_counters_absent=True,
+    player_international_counter_width=2,
     # player_fatigue_offset is DELIBERATELY unset. The measurement that killed
     # it is still valid after the round-105 base fix, it just names the field
     # differently: the old read at person+0x39A is this row's 0x25A one row

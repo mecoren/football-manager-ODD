@@ -198,7 +198,14 @@ def read_fm26_career_stats(reader: Any, player: int) -> dict[str, Any] | None:
 
 
 def read_fm26_international_stats(reader: Any, player: int) -> dict[str, Any] | None:
-    """Read the version-profiled FM26 international counters."""
+    """Read the version-profiled FM26 international counters.
+
+    FM27 keeps no U21 counter pair in the player object (see the round-112 scan
+    recorded in game_layout), so a build can declare the pair absent. In that
+    case only the senior pair has to be readable, and the U21 values come back
+    as None - the profile shows them as "-" - instead of the whole block being
+    withheld because two offsets that cannot exist are missing.
+    """
     layout = getattr(reader, "layout", None)
     offsets = (
         getattr(layout, "player_international_appearances_offset", None),
@@ -206,7 +213,15 @@ def read_fm26_international_stats(reader: Any, player: int) -> dict[str, Any] | 
         getattr(layout, "player_u21_international_appearances_offset", None),
         getattr(layout, "player_u21_international_goals_offset", None),
     )
-    if any(offset is None for offset in offsets):
+    u21_absent = bool(
+        getattr(layout, "player_u21_international_counters_absent", False)
+    )
+    if u21_absent and any(offset is not None for offset in offsets[2:]):
+        # A layout that declares the pair absent while also carrying offsets for
+        # it contradicts itself; publish nothing rather than guess which half.
+        return None
+    required = offsets[:2] if u21_absent else offsets
+    if any(offset is None for offset in required):
         return None
     width = int(getattr(layout, "player_international_counter_width", 2) or 2)
     u21_width = int(getattr(layout, "player_u21_international_counter_width", 1) or 1)
@@ -222,17 +237,25 @@ def read_fm26_international_stats(reader: Any, player: int) -> dict[str, Any] | 
 
     values = (
         counter(offsets[0], width), counter(offsets[1], width),
-        counter(offsets[2], u21_width), counter(offsets[3], u21_width),
+        None if u21_absent else counter(offsets[2], u21_width),
+        None if u21_absent else counter(offsets[3], u21_width),
     )
-    if any(value is None for value in values):
+    if any(value is None for value in values[:2]):
         return None
-    return {
+    result = {
         "source": "fm26_native_international_counters",
         "international_appearances": int(values[0]),
         "international_goals": int(values[1]),
-        "u21_international_appearances": int(values[2]),
-        "u21_international_goals": int(values[3]),
+        "u21_international_appearances": (
+            None if values[2] is None else int(values[2])
+        ),
+        "u21_international_goals": None if values[3] is None else int(values[3]),
     }
+    if u21_absent:
+        # Explicit, so a consumer can tell "this build has no U21 counter" from
+        # "the U21 value read as zero".
+        result["u21_counters_absent"] = True
+    return result
 
 
 def _vector(

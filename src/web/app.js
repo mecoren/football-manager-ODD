@@ -3123,6 +3123,11 @@ function disableFaEnabled() { return Boolean(app.cheatMode && app.disableFa); }
 
 function godModeEnabled() { return Boolean(app.cheatMode && app.godMode); }
 
+// Edit mode lives in the server settings, not localStorage: the write
+// endpoints check the same flag, so a stale tab cannot keep editing after it
+// is switched off elsewhere.
+function editModeEnabled() { return Boolean(app.state?.settings?.edit_mode); }
+
 async function syncDisableFa() {
   if (!app.state || app.disableFaSyncBusy) return false;
   const enabled = disableFaEnabled();
@@ -9751,6 +9756,7 @@ function settingsRenderStateSignature(settings) {
   return JSON.stringify([
     String(app.state?.data_scope_id || ""),
     app.cheatMode, app.freeShop, app.disableFa, app.godMode,
+    editModeEnabled(),
     app.compactMoney, app.darkMode, app.reverseProfitLossColors,
     String(settings.ui_locale || activeUiLocale()), storedLocaleFontKey(settings.ui_locale || activeUiLocale()),
     app.fontSizeStep, app.showHiddenAttributes,
@@ -9799,6 +9805,7 @@ function renderSettingsControls({force = false} = {}) {
   app.settingsRenderSignature = signature;
   $("#cheat-mode").checked = app.cheatMode;
   $("#cheat-actions").classList.toggle("visible", app.cheatMode);
+  if ($("#edit-mode")) $("#edit-mode").checked = editModeEnabled();
   $("#free-shop").checked = app.freeShop;
   $("#disable-fa").checked = app.disableFa;
   if ($("#god-mode")) $("#god-mode").checked = app.godMode;
@@ -25561,6 +25568,10 @@ function openWorldPlayerEditor(player, options = {}) {
   const dialog = $("#world-player-editor-dialog");
   const editor = player?.editor || {};
   if (!dialog || !player || !editor.expected_raw) return;
+  if (!editModeEnabled()) {
+    toast(uiText("settings.edit_mode_required"));
+    return;
+  }
   app.worldPlayerEditorPlayer = player;
   app.worldPlayerEditorOptions = options;
   $("#world-player-editor-title").textContent = uiText("world.editor.title", {player:player.name});
@@ -25646,6 +25657,32 @@ function openWorldPlayerEditor(player, options = {}) {
   if (!dialog.open) dialog.showModal();
   syncWorldPlayerEditorBusy();
   renderIcons(dialog);
+}
+
+// A club profile payload does not carry the editor block (it is built by the
+// world-player reader), so an owned player is upgraded on demand here. This
+// fetch only reads; saving still goes through the editor's own write handlers.
+async function openPlayerEditorFor(person, options = {}) {
+  if (!editModeEnabled()) {
+    toast(uiText("settings.edit_mode_required"));
+    return;
+  }
+  if (person?.editor?.expected_raw) {
+    openWorldPlayerEditor(person, options);
+    return;
+  }
+  const playerId = Number(person?.id || 0);
+  if (!playerId) return;
+  try {
+    const response = await request(`/api/world-players/detail?player_id=${playerId}`);
+    if (!response?.player?.editor?.expected_raw) {
+      toast(uiText("settings.edit_mode_unavailable"));
+      return;
+    }
+    openWorldPlayerEditor(response.player, options);
+  } catch (error) {
+    toast(error.message || uiText("settings.edit_mode_unavailable"));
+  }
 }
 
 function collectWorldPlayerEdits(player) {
@@ -25789,11 +25826,16 @@ function openClubDetail(kind, id, sourceClub = null, options = {}) {
     const content = $("#club-detail-content");
     content.classList.add("player-detail-content");
     const playerNameEditButton = options.worldPlayer ? "" : `<button type="button" data-edit-player-name="${person.id}" aria-label="${escapeHtml(uiText("legacy.profile.edit_name"))}" title="${escapeHtml(uiText("legacy.name.edit_title"))}"><i data-lucide="pencil"></i></button>`;
+    // The full player editor is only offered while edit mode is on. It is the
+    // same dialog the world-player page uses; here it is opened for whichever
+    // profile is on screen, club-owned or not, because the backend resolves
+    // any person uid and checks the setting again before writing.
+    const playerEditorButton = kind === "player" && editModeEnabled() ? `<button type="button" class="detail-edit-player" data-open-player-editor="${Number(person.id)}" aria-label="${escapeHtml(uiText("dialog.edit_player"))}" title="${escapeHtml(uiText("dialog.edit_player"))}"><i data-lucide="wrench"></i></button>` : "";
     const detailPortraitFallback = playerCardPositions(person)[0] || primaryPlayerPosition(person);
     const detailPortrait = legacyPortraitMarkup(
       person, "player-detail-portrait", {fallbackText:detailPortraitFallback},
     );
-    content.innerHTML = `<div class="detail-hero"><div class="player-detail-portrait-frame">${detailPortrait}</div><div class="detail-hero-copy"><span>${uiText("world.player_detail.player_profile")}</span><div class="detail-player-name-row"><h3>${escapeHtml(person.name)}</h3>${playerNameEditButton}</div><strong>${person.height_cm ? `${person.height_cm} cm` : uiText("world.player_detail.height_not_read")}${person.weight_kg ? ` · ${person.weight_kg} kg` : ""} · ${escapeHtml(nationalityLabel)}</strong></div></div>
+    content.innerHTML = `<div class="detail-hero"><div class="player-detail-portrait-frame">${detailPortrait}</div><div class="detail-hero-copy"><span>${uiText("world.player_detail.player_profile")}</span><div class="detail-player-name-row"><h3>${escapeHtml(person.name)}</h3>${playerNameEditButton}${playerEditorButton}</div><strong>${person.height_cm ? `${person.height_cm} cm` : uiText("world.player_detail.height_not_read")}${person.weight_kg ? ` · ${person.weight_kg} kg` : ""} · ${escapeHtml(nationalityLabel)}</strong></div></div>
       <div class="player-detail-overview">
         ${detailPanel(uiText("world.player_detail.kicker_ability"), uiText("world.player_detail.ability_position"), "gauge", `${detailMetrics(abilityRows)}${positionList}`)}
         ${detailPanel(uiText("world.player_detail.kicker_condition"), uiText("world.player_detail.match_condition"), "activity", detailMetrics(statusRows))}
@@ -25820,6 +25862,7 @@ function openClubDetail(kind, id, sourceClub = null, options = {}) {
   }
   if (!$("#club-detail-dialog").open) $("#club-detail-dialog").showModal();
   if (kind === "player" && !options.worldPlayer) $("[data-edit-player-name]")?.addEventListener("click", () => beginPlayerNameEdit(person, options));
+  if (kind === "player" && editModeEnabled()) $("[data-open-player-editor]")?.addEventListener("click", () => openPlayerEditorFor(person, options));
   renderIcons();
 }
 
@@ -30656,6 +30699,27 @@ function bindEvents() {
     app.showHiddenAttributes = event.target.checked;
     localStorage.setItem("fm-odds-show-hidden-attributes", String(app.showHiddenAttributes));
     render();
+  });
+  $("#edit-mode")?.addEventListener("change", async (event) => {
+    const input = event.target;
+    const enabled = Boolean(input.checked);
+    input.disabled = true;
+    setSettingsMutationBusy("edit-mode", true);
+    try {
+      const settings = await request("/api/settings/edit-mode", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+      if (app.state) app.state.settings = settings;
+      toast(uiText(enabled ? "settings.edit_mode_on" : "settings.edit_mode_off"));
+      const detail = $("#club-detail-dialog");
+      if (detail?.open) $("#club-detail-dialog")?.close();
+    } catch (error) {
+      input.checked = !enabled;
+      toast(error.message || uiText("settings.edit_mode_failed"));
+    } finally {
+      input.disabled = false;
+      setSettingsMutationBusy("edit-mode", false);
+      renderSettingsControls({force:true});
+      render();
+    }
   });
   $("#player-name-localization")?.addEventListener("change", async (event) => {
     const input = event.target;

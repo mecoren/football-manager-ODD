@@ -226,6 +226,10 @@ def test_world_player_action_is_foreground_timed_and_keeps_memory_gate():
 
     with (
         patch("fm_odds_web.set_active_save_id"),
+        # Edit mode gates every direct player write, so the timing test opts in
+        # explicitly instead of depending on whatever the machine's settings
+        # file happens to hold.
+        patch("fm_odds_web.edit_mode_enabled", return_value=True),
         patch(
             "fm_odds_web.read_world_player_profile",
             side_effect=lambda player_id: {

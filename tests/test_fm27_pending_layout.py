@@ -439,26 +439,9 @@ class FM27PendingLayoutTests(unittest.TestCase):
                 )
         # Measured at the corrected base but deliberately NOT declared: a qword
         # that lands in the heap is weaker evidence than a DOB that decodes to a
-        # real date, and none of these is needed to register FM27. The U21
-        # counters belong here too - 0x3C0/0x3C1 are not them (42% of players
-        # over 23 read non-zero there and the mean rises with age, the opposite
-        # of a U21 counter), and read_fm26_international_stats returns None
-        # unless all four offsets are present, so the senior pair at
-        # 0x3BC/0x3BE has to stay unset with them rather than half-publish.
-        # Round 119 tried the save's archived INTERNATIONAL rows as an oracle
-        # for the senior pair and they do not qualify: one stat line can appear
-        # under several kinds, transfer splits repeat it, the rows carry the
-        # player's club rather than a national team, and 347 of 2881 joined
-        # players read fewer caps live than the archive claims - an impossible
-        # result for a career counter. The age profile of those rows still says
-        # they are senior internationals, so the archive is the unreliable side,
-        # but that leaves the pair named by behaviour only.
+        # real date, and none of these is needed to register FM27.
         for name in (
             "player_career_stats_offset",
-            "player_international_appearances_offset",
-            "player_international_goals_offset",
-            "player_u21_international_appearances_offset",
-            "player_u21_international_goals_offset",
             "person_relationships_offset",
             "person_languages_offset",
             "person_previous_club_offset",
@@ -469,6 +452,35 @@ class FM27PendingLayoutTests(unittest.TestCase):
                     f"FM27 {name} must stay unset until it is verified",
                 )
                 self.assertIsNotNone(getattr(reference, name))
+        # Round 120 publishes the senior counter pair and declares the U21 pair
+        # absent instead of withholding all four. The U21 pair cannot exist in
+        # this object: every u8 and u16 in player 0x3A0..0x3C7 was scanned and
+        # none is non-zero for 17..22-year-olds and zero afterwards, while
+        # 0x3C0/0x3C1 read non-zero for 42% of players over 23 with a mean that
+        # RISES with age. The senior pair stays behaviour-named, not
+        # oracle-confirmed: round 119 showed the save's archived INTERNATIONAL
+        # rows cannot serve as the third party (one stat line appears under
+        # several kinds, transfer splits repeat it, the rows carry the player's
+        # club, and 347 of 2881 joined players read fewer caps live than the
+        # archive, which a career counter cannot do).
+        self.assertEqual(layout.player_international_appearances_offset, 0x3BC)
+        self.assertEqual(layout.player_international_goals_offset, 0x3BE)
+        self.assertIsNone(layout.player_u21_international_appearances_offset)
+        self.assertIsNone(layout.player_u21_international_goals_offset)
+        self.assertTrue(layout.player_u21_international_counters_absent)
+        self.assertEqual(layout.player_international_counter_width, 2)
+        # FM24/FM26 do keep the U21 pair, so the flag must stay false there and
+        # all four offsets must be declared.
+        for other in (FM24_LAYOUT, FM26_LAYOUT):
+            with self.subTest(layout=other.key):
+                self.assertFalse(other.player_u21_international_counters_absent)
+                for name in (
+                    "player_international_appearances_offset",
+                    "player_international_goals_offset",
+                    "player_u21_international_appearances_offset",
+                    "player_u21_international_goals_offset",
+                ):
+                    self.assertIsNotNone(getattr(other, name))
         # The two deliberate divergences, both measured rather than inherited:
         # 0x25A fails the 0..10000 test where its neighbours pass it, and the
         # attribute encoding needs round(raw/5) rather than floor(raw/5).

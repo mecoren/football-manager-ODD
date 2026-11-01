@@ -406,6 +406,7 @@ from tools.app_settings import (
     set_player_name_localization,
     set_portrait_sources,
     set_championship_enabled,
+    edit_mode_enabled, set_edit_mode,
 )
 from tools.account_store import load_document, merge_account_containers, save_document
 from tools.preview_cup_odds import (
@@ -13162,6 +13163,7 @@ class LocalOddsState:
         }
 
     def edit_world_player(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_edit_mode()
         player_id = int(payload.get("player_id") or 0)
         with self.lock:
             scope_id = self._bind_current_save()
@@ -13179,6 +13181,7 @@ class LocalOddsState:
         }
 
     def edit_world_player_names(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_edit_mode()
         player_id = int(payload.get("player_id") or 0)
         with self.lock:
             scope_id = self._bind_current_save()
@@ -13196,6 +13199,7 @@ class LocalOddsState:
         }
 
     def edit_world_player_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_edit_mode()
         player_id = int(payload.get("player_id") or 0)
         with self.lock:
             scope_id = self._bind_current_save()
@@ -13212,9 +13216,23 @@ class LocalOddsState:
             "data_scope_id": scope_id, "result": result, "player": player,
         }
 
+    def _require_edit_mode(self) -> None:
+        """Refuse direct player writes unless the settings toggle is on.
+
+        The frontend hides the editor while edit mode is off, but a hidden
+        button is not a gate: these endpoints write straight into the game's
+        memory, so each one re-reads the stored setting before it touches
+        anything. The read is deliberately fresh on every call rather than
+        cached on the state object, so turning the mode off takes effect on the
+        next write even in a tab that still shows the editor.
+        """
+        if not edit_mode_enabled():
+            raise ValueError("修改模式未开启，请先在设置中打开修改模式")
+
     def _world_player_action_result(
         self, player_id: int, operation: str, action: Callable[[], Any],
     ) -> dict[str, Any]:
+        self._require_edit_mode()
         player_id = int(player_id)
         with self.lock:
             scope_id = self._bind_current_save()
@@ -23018,6 +23036,10 @@ def build_api_routes() -> RouteRegistry:
     routes.add(
         "POST", "/api/cheat/god-mode",
         lambda _handler, payload, _query: set_god_mode(payload.get("enabled")),
+    )
+    routes.add(
+        "POST", "/api/settings/edit-mode",
+        lambda _handler, payload, _query: set_edit_mode(payload.get("enabled")),
     )
     routes.add("POST", "/api/settings/championship", _post_settings_championship)
     routes.add(

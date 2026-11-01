@@ -438,6 +438,8 @@ dialog { width:min(900px, calc(100vw - 48px)); max-height:84vh; border:1px solid
 .setting-toggle label { display:flex; align-items:center; gap:8px; color:#415049; font-size:13px; font-weight:700; }
 .setting-toggle input { width:17px; height:17px; accent-color:var(--green-2); }
 .setting-toggle small { max-width:270px; color:#7a8881; font-size:13px; line-height:1.5; }
+.settings-content .edit-mode-setting { display:grid; gap:4px; }
+.settings-content .edit-mode-setting small { max-width:100%; }
 .settings-content .full-refresh-setting { align-items:stretch; padding-top:14px; border-top:1px solid #e2e9e5; }
 .full-refresh-setting > div { display:grid; gap:4px; }
 .full-refresh-setting strong { color:#31483e; font-size:13px; }

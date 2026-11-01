@@ -151,6 +151,11 @@ def load_settings() -> dict[str, Any]:
             "betting_limits_enabled": bool(payload.get("betting_limits_enabled", False)),
             "disable_fa_penalties": bool(payload.get("disable_fa_penalties", False)),
             "god_mode": bool(payload.get("god_mode", False)),
+            # Edit mode gates every direct player write (attributes, CA/PA,
+            # contract, names, nationalities...). It is off by default and
+            # stored server-side rather than in the browser, because the write
+            # endpoints check it themselves: a hidden button is not a gate.
+            "edit_mode": bool(payload.get("edit_mode", False)),
             "betting_limit_single": _positive_amount(payload.get("betting_limit_single"), DEFAULT_SINGLE_BETTING_LIMIT),
             "betting_limit_parlay": _positive_amount(payload.get("betting_limit_parlay"), DEFAULT_PARLAY_BETTING_LIMIT),
             **_currency_payload(payload.get("money_currency")),
@@ -282,6 +287,18 @@ def set_god_mode(enabled: Any) -> dict[str, Any]:
         payload = load_settings()
         payload["god_mode"] = bool(enabled)
         return _write_settings(payload)
+
+
+def set_edit_mode(enabled: Any) -> dict[str, Any]:
+    with _LOCK:
+        payload = load_settings()
+        payload["edit_mode"] = bool(enabled)
+        return _write_settings(payload)
+
+
+def edit_mode_enabled() -> bool:
+    """Whether direct player writes are unlocked, read fresh for every write."""
+    return bool(load_settings().get("edit_mode"))
 
 
 def set_championship_enabled(enabled: Any) -> dict[str, Any]:
