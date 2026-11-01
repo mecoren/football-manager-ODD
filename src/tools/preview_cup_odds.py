@@ -6850,6 +6850,62 @@ def competition_season_starts(
             # A discovered next season beginning in the first half of the year
             # still identifies the active competition as calendar-year.
             starts[competition_id] = f"{value.year}-01-01"
+
+    def _result_season_address(result: dict[str, Any]) -> int:
+        try:
+            return int(
+                str((result.get("competition") or {}).get("address") or "0"), 0,
+            )
+        except (TypeError, ValueError):
+            return 0
+
+    # Format rows cannot always resolve a season start (incomplete opening
+    # fields, unverified fixture bounds).  Without a rescue, such competitions
+    # fall back to the July cross-year window, which silently drops the first
+    # half of a calendar-year league's season (e.g. the CSL running March to
+    # November across the FM season boundary).  Results carried by the same
+    # live season object belong to one season no matter which month it began,
+    # so anchor on the latest addressed result and keep that season's history.
+    for competition_id, competition_results in results_by_competition.items():
+        if not competition_id or competition_id in starts:
+            continue
+        configured_calendar = str(
+            (FAMOUS_LEAGUES.get(competition_id) or {}).get("calendar") or ""
+        )
+        if configured_calendar == "cross_year":
+            continue
+        dated = sorted(
+            (date.fromisoformat(str(result["date"])), _result_season_address(result))
+            for result in competition_results
+        )
+        anchored = [(day, address) for day, address in dated if address]
+        if anchored:
+            live_address = anchored[-1][1]
+            live_first = min(
+                day for day, address in anchored if address == live_address
+            )
+            candidate = min(
+                day for day, address in dated
+                if address == live_address
+                or (not address and day >= live_first)
+            )
+        else:
+            unique_days = sorted({day for day, _address in dated})
+            candidate = unique_days[0]
+            for previous, current in zip(unique_days, unique_days[1:]):
+                gap = (current - previous).days
+                cross_year_break = (
+                    previous.month in {4, 5, 6, 7}
+                    and current.month in {6, 7, 8, 9, 10}
+                )
+                calendar_year_break = (
+                    previous.month in {10, 11, 12}
+                    and current.month in {1, 2, 3, 4, 5}
+                )
+                if gap >= 35 and (cross_year_break or calendar_year_break):
+                    candidate = current
+        if not stale_cross_year_start(candidate):
+            starts[competition_id] = candidate.isoformat()
     return starts
 
 

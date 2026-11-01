@@ -80,6 +80,117 @@ class LeagueStandingsTests(unittest.TestCase):
         self.assertEqual(starts[9001], "2026-08-10")
         self.assertEqual(starts[9002], "2026-03-10")
 
+    def test_unverified_calendar_league_rescued_across_july_boundary(self) -> None:
+        def result(day: str, season_address: str) -> dict:
+            return {
+                "date": day,
+                "competition": {"id": 130931, "address": season_address},
+                "home_team": {"id": 1},
+                "away_team": {"id": 2},
+            }
+
+        format_row = {
+            "competition_id": 130931,
+            "season_fixture_bounds_verified": False,
+        }
+        results = [
+            result("2026-03-07", "0x2000"),
+            result("2026-05-16", "0x2000"),
+            result("2026-07-05", "0x2000"),
+            result("2026-10-31", "0x2000"),
+        ]
+
+        starts = competition_season_starts(
+            date(2026, 11, 1), [format_row], results,
+        )
+
+        self.assertEqual(starts[130931], "2026-03-07")
+
+    def test_address_anchor_excludes_previous_cross_year_season(self) -> None:
+        def result(day: str, season_address: str) -> dict:
+            return {
+                "date": day,
+                "competition": {"id": 9002, "address": season_address},
+                "home_team": {"id": 1},
+                "away_team": {"id": 2},
+            }
+
+        results = [
+            result("2025-08-10", "0x1000"),
+            result("2026-05-20", "0x1000"),
+            result("2026-08-09", "0x2000"),
+            result("2026-09-20", "0x2000"),
+        ]
+
+        starts = competition_season_starts(date(2026, 10, 1), [], results)
+
+        self.assertEqual(starts[9002], "2026-08-09")
+
+    def test_unaddressed_recent_results_join_anchored_season_span(self) -> None:
+        def result(day: str, season_address: str = "") -> dict:
+            return {
+                "date": day,
+                "competition": {"id": 9003, "address": season_address},
+                "home_team": {"id": 1},
+                "away_team": {"id": 2},
+            }
+
+        results = [
+            result("2025-11-01"),
+            result("2026-03-07", "0x2000"),
+            result("2026-08-10"),
+            result("2026-09-20", "0x2000"),
+        ]
+
+        starts = competition_season_starts(date(2026, 10, 1), [], results)
+
+        self.assertEqual(starts[9003], "2026-03-07")
+
+    def test_configured_cross_year_leagues_stay_on_global_window(self) -> None:
+        def result(day: str, season_address: str) -> dict:
+            return {
+                "date": day,
+                "competition": {"id": 11, "address": season_address},
+                "home_team": {"id": 1},
+                "away_team": {"id": 2},
+            }
+
+        results = [
+            result("2026-05-24", "0x1000"),
+            result("2026-08-15", "0x2000"),
+        ]
+
+        starts = competition_season_starts(date(2026, 10, 1), [], results)
+
+        self.assertNotIn(11, starts)
+
+    def test_addressless_history_falls_back_to_break_heuristic(self) -> None:
+        def result(day: str, competition_id: int) -> dict:
+            return {
+                "date": day,
+                "competition": {"id": competition_id},
+                "home_team": {"id": 1},
+                "away_team": {"id": 2},
+            }
+
+        results = [
+            result("2026-03-07", 9004),
+            result("2026-04-04", 9004),
+            result("2026-05-02", 9004),
+            result("2026-05-30", 9004),
+            result("2026-06-27", 9004),
+            result("2026-07-25", 9004),
+            result("2026-08-22", 9004),
+            result("2026-09-19", 9004),
+            result("2026-05-20", 9005),
+            result("2026-08-10", 9005),
+        ]
+
+        starts = competition_season_starts(date(2026, 10, 1), [], results)
+
+        self.assertEqual(starts[9004], "2026-03-07")
+        self.assertEqual(starts[9005], "2026-08-10")
+
     def test_patched_season_address_excludes_same_team_results_from_old_calendar(self) -> None:
         def result(day: str, season_address: int) -> dict:
             return {
