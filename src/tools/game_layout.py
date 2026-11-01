@@ -1306,7 +1306,7 @@ FM27_LAYOUT = GameLayout(
     player_ca_offset=0x264,
     player_pa_offset=0x266,
     player_ca_bytes=2,
-    attribute_display_bias=3,
+    attribute_display_bias=2,
     # Historical evidence only. Kept for the audit trail; every offset quoted
     # in this block is person+0x140+FM26, i.e. one row past the target, so the
     # numbers describe the neighbouring player, not this one.
@@ -1348,24 +1348,36 @@ FM27_LAYOUT = GameLayout(
     # row's +0x0C uid), and a contiguous run holding his physical values in
     # either raw encoding anywhere in the 0x4000 object window.
     #
-    # attribute_display_bias is 3, NOT 0: FM27 attribute bytes are not
-    # restricted to multiples of 5 (per id the multiple-of-5 share runs from
-    # ~20% for 0x20/0x21/0x23/0x25/0x26/0x2A..0x2D/0x31..0x39/0x3D/0x43/0x44 up
-    # to 100% for 0x2E/0x2F/0x30/0x38/0x3C/0x3F/0x42), so floor(raw/5)
-    # truncates where round(raw/5) recovers the display value. Measured
-    # mean|CA error|: 10.900 at bias 0, 3.780 at bias 2, 3.100 at bias 3
-    # (signed +0.45). The old "the RCA model prefers +4" note was never
-    # evidence of anything: for values that are multiples of 5 every bias in
-    # 0..4 yields the same display value by construction. The residual ~3 CA
-    # points is consistent with the encoding carrying sub-display precision,
-    # not with a wrong mapping, which costs an order of magnitude more.
+    # attribute_display_bias is 2, NOT 0 and NOT 3. Two separate measurements
+    # were needed to get here:
+    #   * bias 0 is ruled out because FM27 attribute bytes are not restricted to
+    #     multiples of 5 (per id the multiple-of-5 share runs from ~20% for
+    #     0x20/0x21/0x23/0x25/0x26/0x2A..0x2D/0x31..0x39/0x3D/0x43/0x44 up to
+    #     100% for 0x2E/0x2F/0x30/0x38/0x3C/0x3F/0x42), so floor(raw/5)
+    #     truncates where a rounded read recovers the display value.
+    #   * bias 3 came from an INDIRECT objective (mean|CA error| over the FMRTE
+    #     RCA model: 10.900 at 0, 3.780 at 2, 3.100 at 3). That objective has
+    #     its own approximation error, so it moved the optimum by one step.
+    # Round 114 replaced it with a DIRECT oracle: the game's own save file
+    # (rhiever/fmsave, build 27.0.0+2486695, same session and same game date),
+    # joined to live memory on person uid == save `unique_id`. Over 14509
+    # matched players the transform clamp((raw + 2) // 5) reproduces the save's
+    # value for all 52 named attributes with **0 mismatches in 754468
+    # comparisons**; bias 3 reproduces only 79..98% of them, because it differs
+    # exactly when raw % 5 == 2. The six ids that looked bias-agnostic
+    # (0x2E/0x2F/0x30/0x38/0x3C/0x3F) store exact multiples of 5 and score 100%
+    # under every candidate, which is why the earlier search could not separate
+    # them. Bias 2 also fixes the WRITE path: _raw_attribute_target now writes
+    # raw = target*5 - 2, which displays as `target`, instead of target*5 - 3,
+    # which displays one point low.
     #
     # Blind spots: no position weights 0x29/0x2E/0x2F/0x30/0x38/0x3B/0x3C/0x3E/
-    # 0x3F/0x40/0x41/0x42, so the CA objective cannot constrain them (shifting
-    # one such id's source moves mean|CA error| by 0.000). The keeper flag
-    # still confirms 0x2E/0x2F/0x30. The remaining nine (0x29, 0x38, 0x3B,
-    # 0x3C, 0x3E, 0x3F, 0x40, 0x41, 0x42) are inherited from the FM26 table by
-    # contiguity only, not measured on FM27.
+    # 0x3F/0x40/0x41/0x42, so the CA objective could never constrain them. The
+    # round-114 oracle named all of them from data: 0x38 dirtiness, 0x3B
+    # consistency, 0x3E important matches, 0x3F injury proneness, 0x40
+    # versatility. The only two ids it cannot name are 0x27/0x28, which both
+    # read 1..100 with 100 as the modal value (23% and 77% of rows) - the two
+    # foot ratings the product deliberately does not publish.
     #
     # Row structure, CORRECTED in round 105. The round-25 reading - "FM27 hoists
     # the person block to the front, [person 0x140][player 0x288]" - was wrong
@@ -1426,7 +1438,53 @@ FM27_LAYOUT = GameLayout(
     # CA/PA at 0x200/0x202), so the row really is FM26's layout behind an
     # FM26-sized person prefix, and the round-25 hoist rule left no stray number
     # anywhere in the object. The only two deliberate divergences are fatigue
-    # (unset) and attribute_display_bias (3 here, 0 in both other versions).
+    # (unset) and attribute_display_bias (2 here, 0 in both other versions).
+    # Archive cross-check (round 114). Everything above reads the LIVE process;
+    # this block compares it against the game's own SAVE FILE, parsed by
+    # rhiever/fmsave from the .fm container - a different artifact, a different
+    # code path, and therefore an independent oracle rather than a second
+    # opinion from the same source. Build 27.0.0+2486695, database 27.0.0+0,
+    # game date 2036-02-10 (identical to the running session, so nothing moved
+    # in between).
+    #   join key    memory person uid == save `unique_id`. fmsave's own `uid` is
+    #               a different handle for the same row (216444 vs 222724 for
+    #               Joe Gelhardt) and name joins find nothing, because the save
+    #               stores display names (Pedri, Vitinha, Mezenga). The join is
+    #               verified, not assumed: live names match the save's on
+    #               14365/14509 rows (99.01%) against 0.00% for a deliberately
+    #               wrong partner. The 144 disagreements are all nicknames.
+    #   height      14509/14509 exact, delta histogram is the single bucket
+    #               0 -> 14509
+    #   CA          14509/14509 exact
+    #   PA          14509/14509 exact
+    #   attributes  52 named ids x 14509 players = 754468 comparisons, 0
+    #               mismatches under clamp((raw + 2) // 5)
+    #   controls    person+0x36E height 3.69% exact (mean|d| 9.01) and
+    #               person+0x3A4 CA 1.52% exact (mean|d| 23.98) - the round-25
+    #               hoist addresses lose by a factor of 27, so this test can
+    #               tell a right offset from a plausible neighbour.
+    #   positions   the save lists 1..3 natural positions per player from a
+    #               13-label set (no GK/SW). Naming each of the 15 memory slots
+    #               by the label whose presence best predicts its rating
+    #               recovers DL/DC/DR/DM/ML/MR/AML/AMC/AMR/STC/WBL/WBR on EXACTLY
+    #               the shipped indices, with gaps of 10.6..13.6 rating points;
+    #               GK (0) and SW (1) get no match because the save omits them.
+    #               The set-level comparison is NOT usable: fmsave's list is an
+    #               "accomplished" list (mean rating when present 15.3) not a
+    #               threshold on the matrix, and 9998 of its rows have no list.
+    # Names are read through TWO dereferences for 0x50/0x58/0x60 but ONE for
+    # 0x40: person+0x50 -> entry -> string -> <u32 len><utf8>. A round-113 scan
+    # used one dereference for all four, read the entry itself as if it were a
+    # string header, and concluded that 0x50/0x58 held "inline binary" with zero
+    # decodable names. That conclusion is RETRACTED; with the correct chain the
+    # coverage is 17267/17268 first names, 17265/17268 last names and
+    # 1862/17268 common names, which is what _build_person_search_index already
+    # does at database_index.py:913-921.
+    # Limits of the oracle, stated up front: fmsave registers a single FM27
+    # build and marks every FM27 field unconfirmed, so it can flag anomalies but
+    # never proves a layout; 2773 of its 17631 rows carry unique_id 0 and cannot
+    # be joined; and 14509/17268 (84%) of live players are covered, so the
+    # untouched quarter is still only backed by the population audit above.
     # International counters (rounds 112/113) are the one place where an offset
     # can be NAMED by behaviour instead of by range, and the answer is split:
     #   * 0x3BC/0x3BE (u16 caps, u16 goals) are the senior caps/goals pair.

@@ -201,13 +201,24 @@ class FM27PendingLayoutTests(unittest.TestCase):
         self.assertEqual(layout.player_pa_offset, 0x266)
         self.assertEqual(layout.player_ca_bytes, 2)
 
-    def test_fm27_display_bias_is_round_to_nearest_not_floor(self):
-        """FM27 attribute bytes are not multiples of 5, unlike FM24/FM26.
+    def test_fm27_display_bias_is_two_not_three(self):
+        """FM27 needs clamp((raw + 2) // 5), settled by the save-file oracle.
 
-        Measured over 800 live players: mean|CA error| is 10.900 at bias 0,
-        3.780 at bias 2 and 3.100 at bias 3 (signed +0.45, i.e. unbiased).
+        Bias 0 is ruled out because FM27 attribute bytes are not multiples of 5.
+        Bias 3 came from an indirect objective (mean|CA error| through the FMRTE
+        RCA model: 10.900 at 0, 3.780 at 2, 3.100 at 3) whose own approximation
+        error moved the optimum one step too far.
+
+        Round 114 joined live memory to the game's own save (rhiever/fmsave,
+        build 27.0.0+2486695, same session, same game date) on person uid ==
+        save unique_id: 14509 players, 52 named attributes, and
+        clamp((raw + 2) // 5) reproduces the save with 0 mismatches in 754468
+        comparisons. Bias 3 manages only 79..98%, because the two differ exactly
+        when raw % 5 == 2. The write path needs the same constant:
+        raw = target * 5 - 2 displays as `target`, while target * 5 - 3
+        displays one point low.
         """
-        self.assertEqual(FM27_LAYOUT.attribute_display_bias, 3)
+        self.assertEqual(FM27_LAYOUT.attribute_display_bias, 2)
 
     def test_human_manager_fields_are_resolved(self):
         """Both manager fields, resolved by the vtable + person-UID constraint.
@@ -425,7 +436,7 @@ class FM27PendingLayoutTests(unittest.TestCase):
         # 0x25A fails the 0..10000 test where its neighbours pass it, and the
         # attribute encoding needs round(raw/5) rather than floor(raw/5).
         self.assertIsNone(layout.player_fatigue_offset)
-        self.assertEqual(layout.attribute_display_bias, 3)
+        self.assertEqual(layout.attribute_display_bias, 2)
         self.assertEqual(reference.attribute_display_bias, 0)
 
     def test_player_fatigue_stays_unset(self):

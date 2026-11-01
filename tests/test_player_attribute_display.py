@@ -1,16 +1,51 @@
 from types import SimpleNamespace
 
 from tools.club_reader import (
+    VISIBLE_ATTRIBUTE_IDS,
     _display_attribute,
     _visible_player_attributes,
     plan_attribute_reallocation,
 )
-from tools.game_layout import FM24_LAYOUT, FM26_LAYOUT
+from tools.game_layout import FM24_LAYOUT, FM26_LAYOUT, FM27_LAYOUT
 
 
 def test_supported_layouts_discard_partial_attribute_points():
     assert FM24_LAYOUT.attribute_display_bias == 0
     assert FM26_LAYOUT.attribute_display_bias == 0
+
+
+def test_fm27_display_reproduces_the_save_file():
+    """Raw -> display pairs read off the round-114 oracle tables.
+
+    The save records the displayed value and live memory records the byte, so
+    each pair below is a direct observation (crossing for the two-step
+    boundaries, pace for the 21..23 run) rather than a reconstruction. FM27
+    reproduces all of them with bias 2 and misses 47 -> 9 with the old bias 3,
+    which is exactly the raw % 5 == 2 boundary the two constants disagree on.
+    """
+    pairs = {
+        1: 1, 7: 1, 8: 2, 12: 2, 13: 3, 21: 4, 22: 4, 23: 5, 47: 9, 76: 15, 100: 20,
+    }
+    bias = FM27_LAYOUT.attribute_display_bias
+    assert {raw: _display_attribute(raw, bias) for raw in pairs} == pairs
+    assert _display_attribute(47, 3) == 10
+    assert _display_attribute(47, 0) == 9
+
+
+def test_the_seven_unpublished_attribute_ids_are_foot_and_hidden_fields():
+    """The save names 52 of the 54 bytes; the product publishes 47 of them.
+
+    The gap is exactly the seven ids the shipped tables leave out. Round 114
+    named five of them from data (0x38 dirtiness, 0x3B consistency, 0x3E
+    important matches, 0x3F injury proneness, 0x40 versatility); 0x27 and 0x28
+    have no counterpart in the save at all and both read 1..100 with 100 as the
+    modal value, consistent with the two foot ratings.
+    """
+    published = set(VISIBLE_ATTRIBUTE_IDS.values())
+    assert published <= set(range(0x0F, 0x45))
+    assert set(range(0x0F, 0x45)) - published == {
+        0x27, 0x28, 0x38, 0x3B, 0x3E, 0x3F, 0x40,
+    }
 
 
 def test_attribute_display_discards_raw_remainder():
