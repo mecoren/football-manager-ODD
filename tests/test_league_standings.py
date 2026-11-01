@@ -95,9 +95,14 @@ class LeagueStandingsTests(unittest.TestCase):
         }
         results = [
             result("2026-03-07", "0x2000"),
-            result("2026-05-16", "0x2000"),
-            result("2026-07-05", "0x2000"),
-            result("2026-10-31", "0x2000"),
+            result("2026-04-04", "0x2000"),
+            result("2026-05-02", "0x2000"),
+            result("2026-05-30", "0x2000"),
+            result("2026-06-27", "0x2000"),
+            result("2026-07-25", "0x2000"),
+            result("2026-08-22", "0x2000"),
+            result("2026-09-19", "0x2000"),
+            result("2026-10-17", "0x2000"),
         ]
 
         starts = competition_season_starts(
@@ -105,6 +110,38 @@ class LeagueStandingsTests(unittest.TestCase):
         )
 
         self.assertEqual(starts[130931], "2026-03-07")
+
+    def test_reused_season_address_chains_previous_season_rows(self) -> None:
+        """A recycled season-object address must not anchor a stale start."""
+
+        def result(day: str, season_address: str) -> dict:
+            return {
+                "date": day,
+                "competition": {"id": 130932, "address": season_address},
+                "home_team": {"id": 1},
+                "away_team": {"id": 2},
+            }
+
+        address = "0x9000"
+        results = [
+            result("2035-10-19", address),
+            result("2035-11-08", address),
+            result("2036-03-07", address),
+            result("2036-04-04", address),
+            result("2036-05-02", address),
+            result("2036-05-30", address),
+            result("2036-06-27", address),
+            result("2036-07-25", address),
+            result("2036-08-22", address),
+            result("2036-09-19", address),
+            result("2036-10-17", address),
+        ]
+
+        starts = competition_season_starts(
+            date(2036, 11, 1), [], results,
+        )
+
+        self.assertEqual(starts[130932], "2036-03-07")
 
     def test_address_anchor_excludes_previous_cross_year_season(self) -> None:
         def result(day: str, season_address: str) -> dict:

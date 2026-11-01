@@ -6884,26 +6884,29 @@ def competition_season_starts(
             live_first = min(
                 day for day, address in anchored if address == live_address
             )
-            candidate = min(
+            kept = sorted({
                 day for day, address in dated
                 if address == live_address
                 or (not address and day >= live_first)
-            )
+            })
         else:
-            unique_days = sorted({day for day, _address in dated})
-            candidate = unique_days[0]
-            for previous, current in zip(unique_days, unique_days[1:]):
-                gap = (current - previous).days
-                cross_year_break = (
-                    previous.month in {4, 5, 6, 7}
-                    and current.month in {6, 7, 8, 9, 10}
-                )
-                calendar_year_break = (
-                    previous.month in {10, 11, 12}
-                    and current.month in {1, 2, 3, 4, 5}
-                )
-                if gap >= 35 and (cross_year_break or calendar_year_break):
-                    candidate = current
+            kept = sorted({day for day, _address in dated})
+        # A reused season-object address can chain previous-season rows onto
+        # the live anchor, and a calendar-year season can pause for weeks, so
+        # still scan for a season rollover break before trusting day one.
+        candidate = kept[0]
+        for previous, current in zip(kept, kept[1:]):
+            gap = (current - previous).days
+            cross_year_break = (
+                previous.month in {4, 5, 6, 7}
+                and current.month in {6, 7, 8, 9, 10}
+            )
+            calendar_year_break = (
+                previous.month in {10, 11, 12}
+                and current.month in {1, 2, 3, 4, 5}
+            )
+            if gap >= 35 and (cross_year_break or calendar_year_break):
+                candidate = current
         if not stale_cross_year_start(candidate):
             starts[competition_id] = candidate.isoformat()
     return starts
