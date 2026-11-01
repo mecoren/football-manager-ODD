@@ -14,6 +14,10 @@ from tools.app_paths import DATA_ROOT
 from tools.initial_data_audit import Reader
 
 
+# FM26's verified savegame root globals, kept here as the reference values that
+# FM26_LAYOUT also carries. They are deliberately NOT a fallback for other
+# builds: see read_savegame_identity, which now fails closed when a layout
+# declares no roots of its own.
 SAVEGAME_ROOT_RVAS = (0x04E35F60, 0x04E44950)
 SAVEGAME_ID_OFFSET = 0xB8
 SESSION_NONCE_OFFSET = 0xBC
@@ -164,7 +168,15 @@ def read_savegame_identity(reader: Reader) -> dict[str, Any] | None:
         return None
     if layout.key == "fm24":
         return None
-    for rva in layout.savegame_root_rvas or SAVEGAME_ROOT_RVAS:
+    roots = tuple(getattr(layout, "savegame_root_rvas", ()) or ())
+    if not roots:
+        # A layout that declares no savegame roots must NOT inherit the FM26
+        # SAVEGAME_ROOT_RVAS reference tuple. Reading those addresses inside a
+        # different build returns arbitrary bytes, which would be published as a
+        # save id and corrupt the save scope keys built from it. Callers already
+        # treat a missing identity as absent, so failing closed is safe.
+        return None
+    for rva in roots:
         root = reader.ptr(reader.module_base + rva)
         if not root:
             continue

@@ -8,7 +8,7 @@ import pytest
 
 import fm_odds_web as web
 from tools.api_routing import RouteRegistry
-from tools.domain_errors import ValidationError
+from tools.domain_errors import Fm27LayoutPendingError, ValidationError
 
 
 def handler_for(method, path):
@@ -125,6 +125,7 @@ def test_post_dispatch_preserves_specific_business_reason_for_shared_request_ui(
         TypeError("internal type detail"),
         KeyError("internal key detail"),
         RuntimeError("internal runtime detail"),
+        Fm27LayoutPendingError("FM27 memory layout is not verified yet"),
         json.JSONDecodeError("internal JSON detail", "{", 1),
         ValidationError("semantic detail", message_key="error.resource_not_found"),
     ],

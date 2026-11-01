@@ -712,7 +712,10 @@ LATENT_DRAGON_PA_LIMITS = {
     "latent_dragon_divine": 200,
 }
 def _is_goalkeeper(reader: Reader, address: int) -> bool:
-    positions = reader.bytes(address + reader.layout.player_positions_offset, 15) or b""
+    offset = getattr(reader.layout, "player_positions_offset", None)
+    if offset is None:
+        return False
+    positions = reader.bytes(address + int(offset), 15) or b""
     highest = max(positions, default=0)
     return bool(highest and len(positions) > 0 and positions[0] == highest)
 
@@ -1388,10 +1391,15 @@ def _visible_player_attributes(
     reader: Reader, address: int, raw_attributes: bytes | None = None,
     goalkeeper: bool | None = None,
 ) -> dict[str, dict[str, int]]:
+    attributes_offset = getattr(reader.layout, "player_attributes_offset", None)
+    if raw_attributes is None and attributes_offset is None:
+        # This build has no verified attribute block; report nothing rather
+        # than reading an unrelated offset.
+        return {}
     raw = (
         raw_attributes
         if raw_attributes is not None
-        else reader.bytes(address + reader.layout.player_attributes_offset, 54)
+        else reader.bytes(address + int(attributes_offset), 54)
     )
     if not raw or len(raw) != 54:
         return {}
@@ -2894,7 +2902,10 @@ def _player_hidden_attributes(
     raw = (
         raw_attributes
         if raw_attributes is not None
-        else reader.bytes(address + reader.layout.player_attributes_offset, 54)
+        else (
+            reader.bytes(address + reader.layout.player_attributes_offset, 54)
+            if reader.layout.player_attributes_offset is not None else b""
+        )
     ) or b""
     if len(raw) != 54:
         return values
@@ -4142,8 +4153,12 @@ def _player(
     if not identifier or not name:
         return None
     positions = raw_snapshot.get("positions")
+    positions_offset = getattr(reader.layout, "player_positions_offset", None)
     if positions is None:
-        positions = reader.bytes(address + reader.layout.player_positions_offset, 15) or b""
+        positions = (
+            reader.bytes(address + int(positions_offset), 15)
+            if positions_offset is not None else b""
+        ) or b""
     else:
         positions = bytes(positions)
     raw_snapshot["positions"] = positions
@@ -4161,8 +4176,12 @@ def _player(
         }
     highest = max(position_ratings.values(), default=0)
     raw_attributes = raw_snapshot.get("attributes")
+    attributes_offset = getattr(reader.layout, "player_attributes_offset", None)
     if raw_attributes is None:
-        raw_attributes = reader.bytes(address + reader.layout.player_attributes_offset, 54) or b""
+        raw_attributes = (
+            reader.bytes(address + int(attributes_offset), 54)
+            if attributes_offset is not None else b""
+        ) or b""
     else:
         raw_attributes = bytes(raw_attributes)
     raw_snapshot["attributes"] = raw_attributes
@@ -4192,7 +4211,10 @@ def _player(
         "id": int(identifier), "name": name, "address": hex(address),
         "_name_signature": _player_name_signature(reader, person),
         "shirt_number": None,
-        "height_cm": reader.u8(address + reader.layout.player_height_offset),
+        "height_cm": (
+            reader.u8(address + int(reader.layout.player_height_offset))
+            if reader.layout.player_height_offset is not None else None
+        ),
         "nationality_id": int(nation_id) if nation_id is not None else None,
         "nationality": NATION_NAMES.get(nation_id) if nation_id is not None else None,
         "nationality_code": NATION_CODES.get(nation_id) if nation_id is not None else None,
@@ -4262,8 +4284,11 @@ def read_roster_player_profile(
     person = _validated_player_person(reader, address, player_id)
     raw_attributes = raw_snapshot.get("attributes")
     if raw_attributes is None:
-        raw_attributes = reader.bytes(
-            address + reader.layout.player_attributes_offset, 54,
+        raw_attributes = (
+            reader.bytes(
+                address + reader.layout.player_attributes_offset, 54,
+            )
+            if reader.layout.player_attributes_offset is not None else b""
         ) or b""
     nation_id, nationality, nationality_code = _person_nationality(reader, person)
     birth = _person_birth_date(reader, person)
@@ -5944,6 +5969,8 @@ def _apply_native_credit_default_penalty(
     injury_players: list[dict[str, Any]], unpaid: float, loan_amount: float,
     unpaid_ratio: float, pid: int, layout: Any, injury_minimum_days: int = 30,
 ) -> dict[str, Any]:
+    if layout.player_attributes_offset is None:
+        raise ValueError("此构建的球员属性偏移尚未验证，无法执行属性处罚")
     changed: list[dict[str, Any]] = []
     injury_changed: list[dict[str, Any]] = []
     attribute_originals: list[tuple[int, bytes, int]] = []
@@ -6736,11 +6763,17 @@ def read_world_player_profile(player_id: int) -> dict[str, Any]:
                 # Prefetch is an optional latency optimization.  Every factual
                 # read below retains the original narrow-read fallback.
                 pass
-        position_raw = reader.bytes(
-            address + layout.player_positions_offset, len(POSITION_NAMES),
-        ) or b""
-        if len(position_raw) != len(POSITION_NAMES):
-            raise RuntimeError("无法读取球员位置数据")
+        positions_offset = getattr(layout, "player_positions_offset", None)
+        if positions_offset is None:
+            # No verified position block for this build; leave positions empty
+            # rather than reporting an unrelated block.
+            position_raw = b""
+        else:
+            position_raw = reader.bytes(
+                address + int(positions_offset), len(POSITION_NAMES),
+            ) or b""
+            if len(position_raw) != len(POSITION_NAMES):
+                raise RuntimeError("无法读取球员位置数据")
         position_ratings = {
             label: int(value)
             for label, value in zip(POSITION_NAMES, position_raw)
@@ -6996,10 +7029,14 @@ def update_world_player_fields(
         }
         player_fields: dict[str, tuple[int, int]] = {}
         if "positions" in changes:
+            if layout.player_positions_offset is None:
+                raise ValueError("此构建的球员位置偏移尚未验证，无法编辑位置")
             player_fields["positions"] = (
                 int(layout.player_positions_offset), len(POSITION_NAMES),
             )
         if {"attributes", "hidden_attributes"} & set(changes):
+            if layout.player_attributes_offset is None:
+                raise ValueError("此构建的球员属性偏移尚未验证，无法编辑属性")
             player_fields["attributes"] = (
                 int(layout.player_attributes_offset), 54,
             )
@@ -7690,8 +7727,11 @@ def _world_player_table_rows(
         pa = reader.u16(address + layout.player_pa_offset)
         ca = int(ca) if ca is not None and 1 <= int(ca) <= 200 else None
         pa = int(pa) if pa is not None and 1 <= int(pa) <= 200 else None
-        positions_raw = reader.bytes(
-            address + layout.player_positions_offset, len(POSITION_NAMES),
+        positions_raw = (
+            reader.bytes(
+                address + layout.player_positions_offset, len(POSITION_NAMES),
+            )
+            if layout.player_positions_offset is not None else b""
         ) or b""
         position_ratings = {
             label: int(value)
@@ -11535,8 +11575,11 @@ def read_club_profile(
                     for name in POSITION_NAMES
                 )
                 highest = max(position_ratings.values(), default=0)
-                raw_attributes = reader.bytes(
-                    address + layout.player_attributes_offset, 54,
+                raw_attributes = (
+                    reader.bytes(
+                        address + layout.player_attributes_offset, 54,
+                    )
+                    if layout.player_attributes_offset is not None else b""
                 ) or b""
                 visible_attributes = _visible_player_attributes(
                     reader, address, raw_attributes,

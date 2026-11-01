@@ -57,6 +57,21 @@ class UnavailableError(DomainError):
         super().__init__(code, message, HTTPStatus.SERVICE_UNAVAILABLE, phase, retryable, details or {}, message_key, message_params or {})
 
 
+class Fm27LayoutPendingError(UnavailableError, RuntimeError):
+    """Refuse an FM27 attach while that build's memory layout is unverified.
+
+    FM27 identity is confirmed by its executable hash, but the group order of
+    the position and attribute blocks is not verified yet, so reads stay
+    fail-closed.  This is deliberately both a ``DomainError`` (the API returns
+    the stable ``error.game_layout.fm27_pending`` key instead of a generic
+    placeholder) and a ``RuntimeError`` (existing ``except RuntimeError`` call
+    sites keep classifying the refusal exactly as before).
+    """
+
+    def __init__(self, message: str, *, message_key: str = "error.game_layout.fm27_pending") -> None:
+        super().__init__(message, message_key=message_key)
+
+
 def normalize_error(error: Exception, *, operation: str | None = None) -> DomainError:
     if isinstance(error, DomainError):
         return error

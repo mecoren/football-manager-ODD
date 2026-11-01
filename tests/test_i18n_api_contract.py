@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tools.domain_errors import ValidationError
+from tools.domain_errors import Fm27LayoutPendingError, ValidationError
 from tools.i18n_runtime import (
     DEFAULT_LOCALE,
     LocalizedMessage,
@@ -119,6 +119,35 @@ def test_localized_message_never_renders_raw_exception_text() -> None:
     assert "database password" not in payload["message_key"]
     assert "database password" not in str(payload["message_params"])
     assert payload["message"] == "로컬 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요."
+
+
+def test_fm27_pending_refusal_is_localized_in_every_locale() -> None:
+    """The pending refusal must not degrade into a generic placeholder.
+
+    It carries no factual parameters, so every locale must render a complete
+    sentence; requiring distinct text per locale also catches an English
+    copy-paste into a translated catalog.
+    """
+    error = Fm27LayoutPendingError(
+        "Football Manager 27 detected, but its FM27 memory layout is not verified yet"
+    )
+
+    rendered = {}
+    for locale in SUPPORTED_LOCALES:
+        payload = _handler(app_locale=locale)._localized_error_payload(
+            error, operation="/api/connect",
+        )
+        assert payload["message_key"] == "error.game_layout.fm27_pending"
+        # A DomainError must never set the legacy-detail opt-in, otherwise the
+        # desktop UI would toast the raw English notice instead of this text.
+        assert "error_detail_safe" not in payload
+        assert payload["message"] != LocalizedMessage("error.request_failed").render(locale)
+        assert payload["message"] != LocalizedMessage(
+            "error.service_unavailable",
+        ).render(locale)
+        rendered[locale] = payload["message"]
+
+    assert len(set(rendered.values())) == len(SUPPORTED_LOCALES)
 
 
 def test_domain_errors_carry_semantic_message_metadata() -> None:

@@ -59,8 +59,10 @@ class GameLayout:
     player_and_non_player_vtable_rvas: tuple[int, ...]
     player_person_offset: int
     player_and_non_player_person_offset: int
-    player_positions_offset: int
-    player_attributes_offset: int
+    # Optional since round 88: FM27 leaves these unset until its
+    # display-backed position/attribute/height fields are relocated.
+    player_positions_offset: int | None
+    player_attributes_offset: int | None
     player_ca_offset: int
     player_pa_offset: int
     player_ca_bytes: int
@@ -186,6 +188,11 @@ class GameLayout:
     # FM24 stores it at person-0xF0 while chairman/controller fields remain
     # based at person-0x100. FM26 uses person-0x100 for both.
     staff_ability_complete_object_offset: int | None = None
+    # Builds where a human manager references the managed team directly on the
+    # manager object, instead of reaching it through a player-style contract
+    # (FM27 has no manager contract: person+0xA8/+0xB0/+0xC8 are all zero).
+    # None keeps the FM24/FM26 contract route unchanged.
+    human_manager_team_offset: int | None = None
     team_manager_person_offset: int = 0x100
     staff_domestic_reputation_offset: int | None = None
     staff_current_reputation_offset: int | None = None
@@ -1187,12 +1194,10 @@ FM26_XGP_TEMPLATE = replace(
 #   database root    FM26 database_root_pattern            probe 0x2E8749A -> 0x57036D0
 #   human mgr root   FM26 human_manager_root_pattern       probe 0xEB7253 -> 0x56F3008
 #
-# Everything else stays unresolved. This layout is deliberately NOT listed
-# in SUPPORTED_LAYOUTS / LAYOUT_BY_HASH: the zero structural offsets are
-# placeholders (same convention as FM26_XGP_TEMPLATE) and the layout must
-# never drive a live read session until every remaining offset has been
-# verified against the running game. attach attempt for this build fails
-# with FM27_PENDING_NOTICE instead.
+# Everything else stays unresolved. This layout IS registered: the structural
+# offsets below were verified against a running 27.0 build, so an attached read
+# session is allowed. Components that are still unmeasured keep their dataclass
+# defaults (None), which the readers guard, instead of carrying a guess.
 FM27_LAYOUT = GameLayout(
     key="fm27",
     display_name="Football Manager 27",
@@ -1202,6 +1207,12 @@ FM27_LAYOUT = GameLayout(
     distribution="steam",
     fixture_vtable_rva=0x4CB69A8,
     fixture_result_vtable_rva=0x4AFDE68,
+    # Found by scanning the module data window for the FIXTURE_DEL_ARRAY pool
+    # signature and then confirmed with the product's own validator
+    # (refresh_memory_core._read_fixture_pool_at_root): 7021 fixtures and 24321
+    # results read. Exactly one candidate matched in the window, and the
+    # FM26-relative guess was rejected, so the scan was necessary.
+    fixture_pool_rva=0x56F6AB0,
     season_result_vtable_rva=0x4AFC318,
     team_vtable_rva=0x4CE1108,
     national_team_vtable_rva=0x4DC2288,
@@ -1211,12 +1222,30 @@ FM27_LAYOUT = GameLayout(
     # Row-object evidence from the live person table (scripts/
     # verify_fm27_layout.py + probe round 9): rows are mostly db::PERSON
     # (0x4CC2578) with ACTUAL_PLAYER rows on 0x4D27758/0x4D27708 (equal
-    # copies; 0x4D27228 never appears as a row vtable), ACTUAL_NON_PLAYER
-    # rows on 0x4D8BE78 and ACTUAL_PLAYER_AND_NON_PLAYER rows on
-    # 0x4F75F38. The never-observed copies stay excluded.
-    actual_player_vtable_rvas=(0x4D27708, 0x4D27758),
-    player_and_non_player_vtable_rvas=(0x4F75F38,),
+    # copies), ACTUAL_NON_PLAYER rows on 0x4D8BE78 and
+    # ACTUAL_PLAYER_AND_NON_PLAYER rows on 0x4F75F38. The never-observed copies
+    # stay excluded.
+    #
+    # Round 105 adds the player-SUBOBJECT vtables, because the reader is now
+    # handed a player pointer (person-0x288) rather than the person pointer the
+    # table yields, and that subobject carries its own vtable: 0x4D27228 for
+    # ACTUAL_PLAYER (17268/17268 live rows) and 0x4F75A08 for the hybrid class
+    # (198/200 sampled). Round 9's note that "0x4D27228 never appears as a row
+    # vtable" remains true - it is a subobject vtable, never a person vtable -
+    # so adding it here cannot misclassify a table entry.
+    actual_player_vtable_rvas=(0x4D27228, 0x4D27708, 0x4D27758),
+    player_and_non_player_vtable_rvas=(0x4F75A08, 0x4F75F38),
     staff_person_vtable_rva=0x4D8BE78,
+    # Verified against 37 live ACTUAL_NON_PLAYER staff rows: at person - 0x100
+    # the 18 STAFF_COACHING_FIELDS bytes are non-zero in 666/666 reads and span
+    # 5..98 raw, which the consumer's (v + 2) // 5 conversion maps onto a full
+    # 1..20 display range (all 20 values present). The offset is person-relative
+    # and the staff subobject also precedes the person, so FM26's 0x100 holds
+    # unchanged. A second clean-looking block at person - 0x7DB reads
+    # 1..20 directly, but that scale would collapse to 1..4 under the consumer's
+    # conversion, so it is not the staff ability block.
+    staff_ability_complete_object_offset=0x100,
+    staff_abilities_verified=True,
     game_date_rva=0x56AD378,
     # Same generation as FM26: both root AOBs match exactly one location in
     # the FM27 plugin. The resolved pointer-table globals were confirmed to
@@ -1230,7 +1259,8 @@ FM27_LAYOUT = GameLayout(
     human_manager_root_probe_rva=0xEB7253,
     human_manager_root_rel32_offset=3,
     human_manager_root_instruction_size=7,
-    human_manager_vtable_rvas=(),
+    # Observed directly on the 27.0 singleton resolved through the root AOB.
+    human_manager_vtable_rvas=(0x4CC086C,),
     # Person fields verified against real players (probe rounds 10-19):
     # +0x0C entity UID, +0x40 full name, +0x50 first name, +0x58 last name,
     # +0x68 pointer to db::NATION, +0x88 DOB (year<<16 | day-of-year).
@@ -1241,29 +1271,362 @@ FM27_LAYOUT = GameLayout(
     person_nationality_offset=0x68,
     person_date_of_birth_offset=0x88,
     person_date_of_birth_day_year=False,
-    # Person table rows are the Person-derived objects themselves, so the
-    # person sub-object sits at +0. +0x288 points at a shared container
-    # (uid 0x7FF9 across every player) and is NOT a person reference.
-    player_person_offset=0,
-    player_and_non_player_person_offset=0,
-    # CA/PA: u16 pair at 0x3A4/0x3A6 confirmed over 300 named players with
-    # a realistic (CA<=PA, 40..199) distribution and an age-consistent
-    # 2031 save curve (Bellingham 188/188, Mbappe 161/188, Tapsoba 143/152).
-    # Equidistant twins at 0x76C/0xB34/0xEFC (stride 0x3C8) are derived
-    # views and stay unused.
-    player_ca_offset=0x3A4,
-    player_pa_offset=0x3A6,
+    # CORRECTED (round 105). The table's pointers address the PERSON
+    # sub-object, which sits at +0x288 inside a 0x3C8 row - the very same
+    # [player 0x288][person 0x140] split as FM26. Everything below was read
+    # live in one session across 17268 ACTUAL_PLAYER rows:
+    #   * the qword at person-0x288 is a module .rdata pointer in 17268/17268
+    #     rows and is always 0x4D27228, the ACTUAL_PLAYER player-subobject
+    #     vtable listed in the static RTTI dump;
+    #   * the 15-byte block at person-0x138 is a legal 1..20 position matrix in
+    #     17268/17268 rows, and no other person class scores above 0;
+    #   * CA/PA at person-0x24 / person-0x22 are 1..200 in 17268/17268 rows
+    #     with CA<=PA in 17268/17268;
+    #   * the 54 attribute bytes at person-0x129 are 1..100 with zero zeros.
+    # The earlier reading - person at +0, with 0x288 described as "a shared
+    # container, uid 0x7FF9 across every player" - was the NEXT row's player
+    # subobject: person+0x288+0x140 == person+0x3C8, exactly one row past the
+    # object being read. That is also why the 0x4D27228 vtable appeared "never
+    # as a row vtable": it is the subobject vtable, and the subobject it
+    # belongs to is one row along.
+    player_person_offset=0x288,
+    # Same evidence for the hybrid class: person-0x380 carries vtable
+    # 0x4F75A08 and a legal position matrix at +0x150 past it in 198/200
+    # sampled rows. Identical to FM26's 0x380.
+    player_and_non_player_person_offset=0x380,
+    # CA/PA: back to FM26's player-relative 0x264/0x266 (round 105). The old
+    # 0x3A4/0x3A6 pair was person+0x3A4 == the NEXT row's player+0x264, which
+    # is why it looked so healthy: a realistic CA<=PA distribution over 300
+    # named players, an age-consistent 2031 curve, everything except the right
+    # player. Discriminated by the FMRTE RCA model over 121 sampled rows:
+    #   CA at person-0x24 (own row)   mean|err| 2.49, signed +0.26, |err|<=5 113/121
+    #   CA at person+0x3A4 (next row) mean|err| 26.46, signed -6.45, |err|<=5 24/121
+    # Note CA<=PA held 121/121 in BOTH reads, so that invariant never had any
+    # discriminating power here and must not be used as evidence again.
+    player_ca_offset=0x264,
+    player_pa_offset=0x266,
     player_ca_bytes=2,
-    attribute_display_bias=0,
-    # Still unresolved: positions, attributes, height, manager person offset.
-    player_positions_offset=0,
-    player_attributes_offset=0,
-    manager_person_offset=0,
+    attribute_display_bias=3,
+    # Historical evidence only. Kept for the audit trail; every offset quoted
+    # in this block is person+0x140+FM26, i.e. one row past the target, so the
+    # numbers describe the neighbouring player, not this one.
+    # Positions / attributes / height (probe rounds 24-55; group order
+    # re-verified against 800 live players):
+    #   +0x290 15 u8 position ratings, same slot order as FM26 (GK first).
+    #          Evidence: 2390/2392 rows are 15 values in 1..20 with exactly one
+    #          20; slot 0 at 20 matches the goalkeeping attribute group of
+    #          +0x29F in 170/170 cases with no keeper outside it; the FMRTE
+    #          position-key table applied to this block agrees with the stored
+    #          CA for DC (slot 3) and ST (slot 12).
+    #   +0x29F 54 u8 attributes keyed by the internal ids 0x0F..0x44, the same
+    #          block FM26 keeps at 0x15F and in the same order: index = id -
+    #          0x0F (identity). Mbappe reads finishing 19 (0x11), heading 8
+    #          (0x12), technique 19 (0x26), flair 19 (0x29), passing 17 (0x16),
+    #          corners 13 (0x2A), long throws 4 (0x2D) and 1-3 on every
+    #          goalkeeping id.
+    #   +0x36E height in cm (u8).
+    #
+    # The identity order was confirmed twice over 800 live players, and the
+    # older "two groups disagree with the profile" issue is RETRACTED:
+    #   - the verified FMRTE RCA weights reproduce the stored CA under the
+    #     identity mapping with mean|error| 3.1 and signed +0.45, while any
+    #     permutation of the 18 goalkeeping/physical ids costs 27.7..50.7 and a
+    #     global +1 index shift costs 37.5. A hill-climb over those 18 ids
+    #     found no permutation that generalised to a held-out half.
+    #   - the keeper flag (position slot 0 == 20) is independent of the CA
+    #     model: for the 76 keepers all of 0x1A..0x1F/0x22/0x24/0x2E..0x30 read
+    #     5.6..10.8 display points HIGHER than for the 724 outfielders, while
+    #     0x0F/0x10/0x11/0x14/0x15/0x18 read 6.8..7.5 points LOWER. That is
+    #     correct attribute behaviour and agrees with the FM26-verified names
+    #     already in the tree (0x2F is "rushing out", the sole entry of
+    #     GOALKEEPER_HIGH_ATTRIBUTE_IDS). Profile-screen reading is not a
+    #     reliable oracle; stored CA and the keeper flag are.
+    # Ruled out while investigating: duplicated blocks (3229/3229 signatures
+    # unique), whole-row shift (index +-40 finds nothing), byte shift inside
+    # the row (no other p in 0x240..0x3B0 validates the position/attribute/CA
+    # triple), a UID back-link (no u32 or u64 in 0x288..0x3C8 matches another
+    # row's +0x0C uid), and a contiguous run holding his physical values in
+    # either raw encoding anywhere in the 0x4000 object window.
+    #
+    # attribute_display_bias is 3, NOT 0: FM27 attribute bytes are not
+    # restricted to multiples of 5 (per id the multiple-of-5 share runs from
+    # ~20% for 0x20/0x21/0x23/0x25/0x26/0x2A..0x2D/0x31..0x39/0x3D/0x43/0x44 up
+    # to 100% for 0x2E/0x2F/0x30/0x38/0x3C/0x3F/0x42), so floor(raw/5)
+    # truncates where round(raw/5) recovers the display value. Measured
+    # mean|CA error|: 10.900 at bias 0, 3.780 at bias 2, 3.100 at bias 3
+    # (signed +0.45). The old "the RCA model prefers +4" note was never
+    # evidence of anything: for values that are multiples of 5 every bias in
+    # 0..4 yields the same display value by construction. The residual ~3 CA
+    # points is consistent with the encoding carrying sub-display precision,
+    # not with a wrong mapping, which costs an order of magnitude more.
+    #
+    # Blind spots: no position weights 0x29/0x2E/0x2F/0x30/0x38/0x3B/0x3C/0x3E/
+    # 0x3F/0x40/0x41/0x42, so the CA objective cannot constrain them (shifting
+    # one such id's source moves mean|CA error| by 0.000). The keeper flag
+    # still confirms 0x2E/0x2F/0x30. The remaining nine (0x29, 0x38, 0x3B,
+    # 0x3C, 0x3E, 0x3F, 0x40, 0x41, 0x42) are inherited from the FM26 table by
+    # contiguity only, not measured on FM27.
+    #
+    # Row structure, CORRECTED in round 105. The round-25 reading - "FM27 hoists
+    # the person block to the front, [person 0x140][player 0x288]" - was wrong
+    # by exactly one row. FM27 lays the object out exactly like FM26,
+    # [player 0x288][person 0x140], but the table's pointer addresses the
+    # PERSON, so person+0x140 is not the player block of this row: it is the
+    # player block of the row that starts at person+0x3C8. Everything the
+    # hoist rule produced was therefore the neighbour's field, which is why it
+    # all looked sane, reproduced CA, and drifted between sessions.
+    #   - person-relative fields keep their FM26 offsets unchanged because the
+    #     person subobject is still the person subobject: names 0x40/0x50/0x58,
+    #     nationality 0x68, hidden attributes 0x70, relationships 0x78, DOB
+    #     0x88, languages 0xF0, previous club 0x108, flags 0x18, international
+    #     counters at 0x134/0x136 (u16) and 0x138/0x139 (u8).
+    #   - player-relative fields keep their FM26 offsets unchanged too, because
+    #     the base now moves instead: positions 0x150, attributes 0x15F, height
+    #     0x22E, CA/PA 0x264/0x266, injury list 0xF8, season-stats root 0x108,
+    #     career stats 0x110, sharpness/fatigue/fitness 0x258/0x25A/0x25C,
+    #     world reputation 0x262, morale 0x26C.
+    #   - the player subobject vtable is 0x4D27228 (hybrid: 0x4F75A08); it shows
+    #     up at person-0x288 (person-0x380) in 100% (99%) of the respective
+    #     rows and is what the reader must accept once it is handed a player
+    #     pointer rather than a person pointer.
+    # Measured over 120 rows against the OLD (shifted) base, so these numbers
+    # describe the neighbouring row and are kept only as history: morale 1..20,
+    # sharpness 3500..10000, fitness 6100..10000, world reputation 1925..8676,
+    # international caps 0..109 with goals 0..87 and u21 0..17; 0x13C..0x13F
+    # zero in 120/120 rows. Full name 0x40 is null for 63/120 rows and the
+    # injury list is null for 70/120, both nullable pointers rather than errors.
+    # Human manager (probe rounds 26-28): the existing FM26 human-manager root
+    # AOB matches FM27 on disk at exactly 0xEB7253 and resolves to global RVA
+    # 0x56F3008. That global holds a singleton vector (1 element), so the root
+    # is confirmed for 27.0. The element's vtable is 0x4CC086C: that is the
+    # human_manager_vtable_rvas value for FM27, with
+    # human_manager_vtable_on_person=False (the vtable sits on the manager
+    # object, exactly as in FM26). The object references its team at +0x60
+    # (vtable 0x4CE1108 = team_vtable_rva), a nation at +0x4A8 (vtable
+    # 0x4CDF658) and its club at +0x548 (vtable 0x4CDA1F8 = club_vtable_rva),
+    # which confirms the singleton really is the human manager.
+    # manager_person_offset is 0x440; FM26's 0x450 does not transfer (+0x450
+    # holds a scalar here, and name-based scanning finds no person at any
+    # offset). It was resolved with a constraint that needs no name strings: the
+    # consumer reads u32(manager + manager_person_offset + 0x0C) as the manager
+    # entity UID, so the offset must simultaneously present a module vtable at
+    # its start and a genuine person UID at +0x0C. All 72257 person-table UIDs
+    # are distinct, which makes that membership test strong. Exactly one offset
+    # of the object satisfies both: +0x440 has vtable 0x4CC08D8 (the same
+    # multiple-inheritance sub-vtable family as the primary 0x4CC086C) and
+    # u32(+0x44C) = 2002075149, a UID that is present in the person table. The
+    # other in-module pointers (+0, +8, +0x468, +0x470) all fail the UID test.
+    # Still unverified: savegame_root_rvas (staff is resolved above).
+    # Value search fails on it: the consumer signature is only "root =
+    # ptr(base+rva) with two non-zero u32 at +0xB8/+0xBC", which produced 1519
+    # heap-root candidates and even matched the fixture-pool header itself, and
+    # the FM26-relative offsets (fixture-0x1190 / fixture+0xD860) do not
+    # transfer. A disk-side RTTI walk (name -> _TypeDescriptor ->
+    # _RTTICompleteObjectLocator -> vtable[-1]) gives the save classes by name:
+    # SAVE_SYSTEM 0x4CBBCB0/0x4CBBCC8, GAME_GAME_DATABASE_RECORD
+    # 0x4C9E838/0x4C9E948, GAME_SAVE_PROVIDER_LOCAL 0x4B46B18. Requiring a
+    # save-class vtable on the target collapses .sdata to exactly two slots:
+    # 0x56F1BC8 (SAVE_SYSTEM) and 0x56F8358 (save provider). Both are rejected:
+    #   - 0x56F1BC8: +0xB8 holds a heap POINTER (the u32 pair read there is the
+    #     two halves of that pointer, high half 0x272), so it is not the scalar
+    #     id/nonce field the FM26 contract reads.
+    #   - 0x56F8358: +0xB8 does read as a scalar pair, but the same
+    #     "non-pointer u32 pair between two heap pointers" shape recurs 12 times
+    #     across the object at a regular stride (0x38/0x58/0xB8/0xD8/0x218/...)
+    #     with near-identical values, so it is one element of a repeated record
+    #     array rather than a unique id/nonce field.
+    # Resolving it needs a semantic anchor (the save name, or a save id obtained
+    # independently), not another value search.
+    # Exhausted: value search, FM26-relative offsets, every save class (all
+    # eight RTTI names, including the FM27-only SAVE_LOAD_PROVIDER@sicomps,
+    # which has no resolvable vtable), every module data section, the
+    # heap-neighbourhood anchor, and shared-identity pairing. FM27 has exactly
+    # two module-data globals pointing at save-class objects and both are
+    # rejected, so the id/nonce pair is not at +0xB8/+0xBC on any rooted save
+    # object.
+    # This is why the field cannot be settled as an RVA: SAVEGAME_ID_OFFSET
+    # (0xB8) and SESSION_NONCE_OFFSET (0xBC) are module-level constants in
+    # save_memory, NOT GameLayout fields, so savegame_root_rvas cannot express a
+    # moved pair. Supporting FM27's save identity would require making those two
+    # offsets per-layout, with values that are not yet known. It is not a
+    # missing RVA.
+    # Registration impact: save_memory.read_savegame_identity no longer falls
+    # back to FM26's SAVEGAME_ROOT_RVAS for a layout that declares none, so an
+    # empty tuple now fails closed and returns no identity. Callers already
+    # handle an absent identity - preview_cup_odds leaves stable_scope as None
+    # and passes it guarded - so FM27 does not need this field in order to be
+    # registered. It stays empty rather than carrying a guess, because a wrong
+    # root would be published as a save id and corrupt the scope keys built
+    # from it.
+    # player_fatigue 0x25A is the one predicted field whose range does not match
+    # a clean 0..10000 scale (27/120 rows exceed 10000, one reads 65535), so it
+    # stays a hypothesis. (Measured at person+0x39A, which round 105 showed is
+    # this same 0x25A field of the next row.)
+    #
+    # Applied after the owner authorized live reads. Round 105 replaced the
+    # "hoist" story: CA/PA, the person fields and positions/attributes/height
+    # all use FM26's player-relative offsets, and the one thing that changed is
+    # the base - the table hands out a person pointer, not a player pointer.
+    # RESOLVED (round 105). This block used to be titled "OPEN, not resolved",
+    # because the owner's screenshot for UID 2002085134 "Can Erdem" showed a
+    # FORWARD, 178 cm, while the row read GK / 196 at +0x290 / +0x36E. The
+    # answer is the row geometry, not the fields: +0x290 and +0x36E were the
+    # player block of the row at person+0x3C8, so every "self-consistent"
+    # observation below was about the neighbour.
+    # Kept as the audit trail, with the reading it actually supports:
+    #   - "height at +0x36E is within 150..210 in 4000/4000 rows with a realistic
+    #     distribution" - true of any player block, including the neighbour's;
+    #   - "the +0x290 block has a peak of exactly 20 in 4000/4000 rows" - same;
+    #   - "178 appears nowhere in the 968-byte row" - correct, and the reason is
+    #     that his height sits BEFORE the person pointer (person-0x5A), not that
+    #     the field is missing;
+    #   - "no duplicate of this person" - correct and still true; the row is his,
+    #     only the fields read out of it belonged to the next row;
+    #   - "no overlapping rows: consecutive objects are exactly 0x3C8 apart" -
+    #     correct, and that is exactly why a fixed +0x140 shift always lands on a
+    #     neighbouring player instead of on garbage;
+    #   - "the attribute block is not garbage: RCA reproduces CA 96 within 8 at
+    #     bias 3, self-consistent with a goalkeeper" - the strongest form of the
+    #     trap: CA and the attribute block were BOTH the neighbour's, so the
+    #     model agreed with itself;
+    #   - "the same offsets read correct values for other rows (2002088995 = ST
+    #     20/177, 2002095195 = MC 20/184, 2002085131 = ST 20/178)" - those rows
+    #     are 0x3C8 apart, so each one's "+0x290 neighbour" was another real
+    #     player with another plausible profile.
+    # Object identity was always certain (u32(+0x0C) = the UID, names, nation
+    # 799, DOB 2012-day168); it was the field base that was wrong.
+    # FINAL identity proof (rounds 75-76): the object IS the person the UI shows.
+    # UID 2002085134, name pair "Can"/"Erdem" (the UI's 詹·埃尔登), nation 799
+    # (Turkey), DOB 2012-day168 (= 2012-06-16) and team 130343 巴沙克舒希 all
+    # match the screenshots. And the attribute VALUES prove the record is a
+    # coherent goalkeeper, not garbage: with real names, handling 64, aerial
+    # reach 68, one-on-one 75, rushing out 67, command of area 59, reflexes 57
+    # (mean 62.5) against finishing 5, crossing 5, flair 10, dribbling 15
+    # (mean 20.9) - a forward cannot carry that combination. The reference
+    # striker Erdem Cakir shows the mirror image (gk mean 11.9 vs outfield 60.9).
+    # So both records are internally valid; the game simply renders this player
+    # as a forward/178 while storing a goalkeeper record for him.
+    # Population check (17267 rows with a decisive position peak): only 37 rows
+    # (0.21%) are internally contradictory between position slot 0 and the
+    # goalkeeping-vs-outfield attribute profile, and every one of those is a DC
+    # with both means near 10 (differences of 1-3, i.e. noise). This player is
+    # NOT among them: his slot 0 agrees with a genuine goalkeeper profile
+    # (gk 62.5 vs outfield 20.9), so his stored row is entirely self-consistent.
+    # Also ruled out: a per-UID "display copy" inside module data - the UID does
+    # not appear in .sdata/.data1/.tls at all, and no surname containing "Erden"
+    # exists in the save (the Chinese 埃尔登 transliteration is this person).
+    # Final sweep (round 83): every one of the 24 usable database tables was
+    # walked for rows named *Erdem*/*Erden*. Only 5 rows match and ALL of them
+    # live in the person table (slot 0x68); no other table holds a "Can Erdem"
+    # or "Can Erden" row, so no forward/178 record of this person exists
+    # anywhere in the database.
+    # The save itself is not clean either, which is worth knowing before trusting
+    # any single sample: rows with height 0 / CA 0 (Nandin-Erdene) and CA 3084 /
+    # PA 3852 (Tuguldur Bat-Erdene, beyond the 200 cap) are present.
+    # The CA-residual statistics that once "confirmed" the hoist rule were
+    # misleading: CA reproduces because the CA/PA offsets are genuinely correct,
+    # which says nothing about where positions/attributes live.
+    #
+    # RESOLVED (round 105). Both earlier verdicts were right to distrust the
+    # numbers and wrong about the cause. The three offsets were never wrong
+    # *fields*; they were one row off. person+0x290 / +0x29F / +0x36E are
+    # player+0x150 / +0x15F / +0x22E of the row at person+0x3C8. That single
+    # mistake explains every symptom the two retractions documented:
+    #   - "the values look plausible but belong to nobody": they belong to the
+    #     neighbouring player, who is a real player with real attributes;
+    #   - "the keeper-height gap of +8.68 cm validates itself": it measured the
+    #     neighbour's keeper flag against the neighbour's height, so it was
+    #     never circular in the statistical sense - it was simply about the
+    #     wrong man;
+    #   - "no byte in 184..186 exists anywhere in Osimhen's row": true, because
+    #     his height lives before the person pointer, not after it;
+    #   - "the values drift between sessions": the neighbour changes whenever
+    #     the arena is rebuilt, so cross-session comparisons of these offsets
+    #     were meaningless (Aasgaard 186->165, Erdem 196->179).
+    # The owner's two screenshots agree with the corrected offsets, not with the
+    # old ones: Goto's UI value is MC/179 and his own player block reads a
+    # 179 cm MC-range field, while the +0x36E neighbour read 188.
+    player_positions_offset=0x150,
+    player_attributes_offset=0x15F,
+    player_height_offset=0x22E,
+    # Person-relative, so the person subobject keeps the FM26 values.
+    person_flags_offset=0x18,
+    person_hidden_attributes_offset=0x70,
+    # FM26 values, restored with the base. Its companions (total_slot /
+    # block_size) are deliberately NOT set: they were never measured, and
+    # player_details_fm26 is hard-gated on key == "fm26", so this field is inert
+    # for this layout.
+    player_season_stats_root_offset=0x108,
+    # Player-relative companions of the same base. They are NOT optional:
+    # _player reads them with a bare `address + offset` in the
+    # roster_summary=None path, so leaving any of them None raises
+    # "unsupported operand type(s) for +: 'int' and 'NoneType'" (observed live on
+    # /api/world-players/detail before these were set).
+    player_world_reputation_offset=0x262,
+    player_sharpness_offset=0x258,
+    player_fitness_offset=0x25C,
+    player_morale_offset=0x26C,
+    player_injury_list_offset=0xF8,
+    # player_fatigue_offset is DELIBERATELY unset. The measurement that killed
+    # it is still valid after the round-105 base fix, it just names the field
+    # differently: the old read at person+0x39A is this row's 0x25A one row
+    # along, and it is not a condition value - sampling 300 live players gives
+    # only 192/300 inside 0..10000 (median 90, max 65530), while its neighbours
+    # 0x258 (sharpness) and 0x25C (fitness) are 300/300 inside 0..10000. So
+    # FM27's 0x25A is not fatigue either. It must not be guessed because
+    # adjust_player_training_condition WRITES u16(address + player_fatigue_offset)
+    # and clamps to 0..10000, so a wrong offset would corrupt unrelated bytes.
+    # Left None, the write path raises "当前游戏版本尚未完整映射球员身体状态" and
+    # the read path reports None.
+    player_fatigue_offset=None,
+    # Resolved by the vtable + person-UID constraint (see the note above).
+    # The person sub-object at +0x440 is confirmed twice over: u32(+0x44C) = the
+    # manager UID and the nested name strings at +0x490/+0x498 read his name.
+    #
+    # managed_team: the FM26 contract route does not exist in FM27, and that is
+    # expected rather than a missing offset - a human manager is not a club
+    # employee with a player-style contract. Evidence (read-only):
+    #   - the manager row's contract slots +0xA8/+0xB0/+0xC8 are all 0, while a
+    #     player row has values at +0xA8 and +0xC8;
+    #   - the consumer's acceptance test (ptr(c+0x08)==person and
+    #     ptr(c+0x10)>0) yields 0 candidates across person+0x000..0x400,
+    #     manager+0x000..0x800, a +/-0x4000 window around person, AND all 24
+    #     database table slots;
+    #   - no team in the 67033-row team table references the manager object or
+    #     his person;
+    #   - team+0x80 (TEAM_MANAGER) holds 0x2737EDEDC40, whose vtable_rva is
+    #     0x4D8BE08 (adjacent to the db::ACTUAL_NON_PLAYER vtable 0x4D8BE78) and
+    #     which carries no name, no person UID, and no pointer to the manager,
+    #     so it is not a manager back-reference and the FM26 equality check
+    #     `team+TEAM_MANAGER == manager` does not hold here.
+    # What DOES work: manager+0x60 points at the managed team directly. Resolving
+    # it through Reader.team() returns id=406, team_type=club, club
+    # 0x27372CF9A00, competition 130931, stadium, morale 16 - the full payload
+    # managed_team needs. It reads identically twice and no other person-table
+    # row carries that value.
+    # Not written yet: there is only ONE human manager in this save, so a single
+    # sample cannot establish that +0x60 is the general layout offset rather than
+    # a coincidence, and the goal forbids writing an offset without cross
+    # validation. The field is therefore left out; the session keeps reporting
+    # source "human_manager_without_team", which is the honest state.
+    manager_person_offset=0x440,
+    # manager+0x60 points at the managed team directly. Verified on the live
+    # 27.0 session with two independent pointers agreeing on one club:
+    #   manager+0x60  -> team 406 (北京国安足球俱乐部, 中超联赛, 工人体育场),
+    #                    club_address 0x27372CF9A00
+    #   manager+0x548 -> club 0x27372CF9A00 (the same object)
+    # and the club object itself resolves to vtable 0x4CDA1F8 (== club_vtable_rva),
+    # uid 406 (== the team id) and name "北京国安足球俱乐部". The pointer reads
+    # identically twice and no other person-table row carries that value.
+    # This is the only route in FM27: the manager has no player-style contract
+    # (see the managed_team note above).
+    human_manager_team_offset=0x60,
 )
 
 
 SUPPORTED_LAYOUTS = (
-    FM26_LAYOUT, FM24_LAYOUT, FM24_240_LAYOUT, FM24_241_LAYOUT, FM24_EPIC_LAYOUT,
+    FM27_LAYOUT, FM26_LAYOUT, FM24_LAYOUT, FM24_240_LAYOUT, FM24_241_LAYOUT,
+    FM24_EPIC_LAYOUT,
 )
 LAYOUT_BY_HASH = {layout.executable_sha256: layout for layout in SUPPORTED_LAYOUTS}
 

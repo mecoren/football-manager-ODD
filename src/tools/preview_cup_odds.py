@@ -2246,6 +2246,25 @@ def _human_manager_session_from_address(
             "manager_address": hex(int(manager)),
             "source": "native_database_index",
         })
+    direct_team_offset = getattr(reader.layout, "human_manager_team_offset", None)
+    if not managed_refs and direct_team_offset is not None:
+        # Builds where a human manager references the managed team directly on
+        # the manager object. FM27 has no player-style manager contract, so the
+        # contract route above always yields nothing there. The team must still
+        # resolve as a real team object before it is accepted.
+        team_address = int(reader.ptr(int(manager) + int(direct_team_offset)) or 0)
+        team = reader.team(team_address) if team_address else None
+        if team and team.get("id"):
+            managed_refs.append({
+                "game_instance_id": f"human-{manager_id}",
+                "team_id": int(team["id"]),
+                "team_type": str(team.get("team_type") or "club"),
+                "manager_id": manager_id,
+                "address": team.get("address"),
+                "club_address": team.get("club_address"),
+                "manager_address": hex(int(manager)),
+                "source": "human_manager_team_offset",
+            })
     managed_refs = list({
         (ref["team_id"], ref["team_type"]): ref for ref in managed_refs
     }.values())
@@ -2272,7 +2291,12 @@ def _discover_human_managers_direct(
     builds. Scan that allocation directly and validate every manager through
     their contract and the managed team's back-reference.
     """
-    if reader.layout.key not in {"fm24", "fm26"} or not reader.layout.human_manager_vtable_rvas:
+    if not reader.layout.human_manager_vtable_rvas:
+        # Capability gate rather than a version allow-list: the scan needs the
+        # manager object's verified vtable, and every registered layout that has
+        # one may be scanned. FM27 qualifies because its human-manager root AOB
+        # resolves and its vtable (0x4CC086C) was verified against a live 27.0
+        # session. A build without that evidence still returns [] here.
         return []
     directory = database_index_for_reader(reader)
     if directory is not None:
@@ -7481,7 +7505,18 @@ def generate_all_odds(
                         "club_address": team.get("club_address"),
                         "manager_address": team.get("manager_address"),
                     })
-                manager_address = int(team.get("manager_address", "0x0"), 16)
+                # Prefer the manager object the session already verified. FM27's
+                # team.manager_address is a staff/link object, not the manager
+                # object (team+0x80 carries vtable 0x4D8BE08 and no person UID),
+                # so deriving person = team.manager_address + manager_person_offset
+                # yields a bogus id (627 in the live sample) and the next refresh
+                # then treats that id as the preferred manager, blanking the team.
+                session_manager_address = int(
+                    str(manager_session.get("manager_address") or "0x0"), 16,
+                )
+                manager_address = session_manager_address or int(
+                    team.get("manager_address", "0x0"), 16,
+                )
                 if manager_address and not manager_details:
                     person = manager_address + reader.layout.manager_person_offset
                     manager_id = reader.u32(person + ENTITY_UID)
@@ -7501,7 +7536,7 @@ def generate_all_odds(
                             "team_type": team.get("team_type"),
                             "game_instance_id": manager_session["game_instance_id"],
                             "source": "current_save_team_manager",
-                            "manager_address": team.get("manager_address"),
+                            "manager_address": hex(manager_address),
                             "person_address": hex(person),
                             "coaching_license": _manager_coaching_license(
                                 reader, person,

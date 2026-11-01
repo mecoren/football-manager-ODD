@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from tools.app_paths import ASSET_ROOT
+from tools.domain_errors import Fm27LayoutPendingError
 from tools.game_layout import (
     FM24_XGP_LAYOUT, FM26_LAYOUT, FM26_XGP_TEMPLATE, FM27_EXE_SHA256,
     FM27_LAYOUT, FM27_PENDING_NOTICE, GameLayout,
@@ -517,8 +518,12 @@ class Reader:
             # They have a player vtable but no readable person name and invalid CA.
             if not name or ca is None or not 1 <= ca <= 200:
                 continue
-            positions_raw = self.bytes(
-                player + self.layout.player_positions_offset, len(POSITION_NAMES)
+            positions_raw = (
+                self.bytes(
+                    player + self.layout.player_positions_offset,
+                    len(POSITION_NAMES),
+                )
+                if self.layout.player_positions_offset is not None else b""
             ) or b""
             positions = {
                 position: rating
@@ -1116,13 +1121,19 @@ def select_game_layout(key: str) -> dict[str, Any]:
 
 
 def select_game_process(
-    key: str, pid: int, *, selected: tuple[int, str, GameLayout] | None = None,
+    key: str, pid: int,
+    *, selected: tuple[int, str, GameLayout | None] | None = None,
 ) -> bool:
     """Pin reads to one process and preserve an unchanged live read session.
 
     ``selected`` is the already verified result from process discovery. Keeping
     it avoids a second process scan/layout resolution in the asynchronous
     connection worker. Callers without that result retain lazy resolution.
+
+    A ``selected`` entry whose layout is ``None`` is a pending row (currently
+    only FM27): its identity is confirmed by executable hash but its offsets
+    are unverified, so the attach is refused with ``Fm27LayoutPendingError``
+    instead of being reported as a process mismatch.
     """
     global _PREFERRED_LAYOUT_KEY, _PREFERRED_PROCESS_PID, _PROCESS_LAYOUT_CACHE
     target_key = str(key)
@@ -1131,9 +1142,15 @@ def select_game_process(
     if resolved is not None:
         resolved = resolve_selected_process_layout(resolved)
         resolved_pid, _resolved_path, resolved_layout = resolved
+        if resolved_layout is None:
+            # Process discovery confirmed the FM27 identity by executable hash
+            # but left layout as None because the build's offsets are still
+            # unverified.  Refuse exactly like select_process instead of
+            # reporting a missing layout as a process mismatch.
+            raise Fm27LayoutPendingError(FM27_PENDING_NOTICE)
         if (
             int(resolved_pid) != target_pid
-            or str(getattr(resolved_layout, "key", "")) != target_key
+            or str(resolved_layout.key) != target_key
         ):
             raise ValueError(
                 "selected Football Manager process does not match the requested target"
@@ -1173,8 +1190,8 @@ def select_game_process(
 
 
 def resolve_selected_process_layout(
-    selected: tuple[int, str, GameLayout],
-) -> tuple[int, str, GameLayout]:
+    selected: tuple[int, str, GameLayout | None],
+) -> tuple[int, str, GameLayout | None]:
     """Resolve a dynamic XGP template before pinning it to a read session."""
     pid, process_path, layout = selected
     if not (
@@ -1249,7 +1266,7 @@ def select_process() -> tuple[int, str]:
     available = running_supported_processes()
     if not available:
         if _pending_fm27_process_path() is not None:
-            raise RuntimeError(FM27_PENDING_NOTICE)
+            raise Fm27LayoutPendingError(FM27_PENDING_NOTICE)
         raise RuntimeError("supported fm.exe is not running")
     with _PROCESS_SELECTION_LOCK:
         selected_key = _PREFERRED_LAYOUT_KEY
@@ -1275,7 +1292,7 @@ def select_process() -> tuple[int, str]:
     if selected.get("pending"):
         # Preferred FM27 build: refuse the read session with the explicit
         # pending notice instead of resolving an unverified layout.
-        raise RuntimeError(FM27_PENDING_NOTICE)
+        raise Fm27LayoutPendingError(FM27_PENDING_NOTICE)
     return int(selected["pid"]), str(selected["path"])
 
 
