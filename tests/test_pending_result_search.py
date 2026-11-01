@@ -5,7 +5,7 @@ import unittest
 from contextlib import nullcontext
 from unittest.mock import patch
 
-from conftest import legacy_web_source
+from conftest import legacy_web_source, raw_web_source
 
 from fm_odds_web import LocalOddsState
 from tools.betting_account import (
@@ -293,8 +293,8 @@ class PendingResultSearchTests(unittest.TestCase):
 
     def test_frontend_replaces_overdue_pending_status_with_search_button(self) -> None:
         script = legacy_web_source("web/app.js")
-        stylesheet = open("web/app.css", encoding="utf-8").read()
-        server = open("fm_odds_web.py", encoding="utf-8").read()
+        stylesheet = raw_web_source("web/app.css")
+        server = raw_web_source("fm_odds_web.py")
 
         self.assertIn("elapsedDays >= waitDays;", script)
         self.assertIn('"result_search_wait_days": RESULT_SEARCH_WAIT_DAYS', server)

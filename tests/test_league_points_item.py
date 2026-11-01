@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from unittest.mock import patch
 
+from conftest import raw_web_source
+
 from fm_odds_web import LocalOddsState
 
 
@@ -118,8 +120,8 @@ def test_league_points_item_ignores_non_writable_secondary_table() -> None:
 
 
 def test_league_points_item_frontend_exposes_batch_dialog_and_api() -> None:
-    app = open("web/app.js", encoding="utf-8").read()
-    page = open("web/index.html", encoding="utf-8").read()
+    app = raw_web_source("web/app.js")
+    page = raw_web_source("web/index.html")
 
     assert 'const LEAGUE_POINTS_SKU = "league_point_plus_one"' in app
     assert 'data-use-league-points=' in app

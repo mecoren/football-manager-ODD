@@ -84,11 +84,17 @@ def test_every_loaded_domain_catalog_has_locale_and_parameter_parity() -> None:
     modules = output["modules"]
     assert modules
     for module in modules:
-        assert set(module) == set(LOCALES)
-        key_sets = {locale: set(module[locale]) for locale in LOCALES}
+        # A domain catalog carries at least the three core locales; the settings
+        # domain additionally carries every extension pack. Pinning the exact set
+        # here would fail the moment a locale is added, so the contract is the
+        # one that matters: whatever a catalog carries must mirror en-GB exactly,
+        # or that locale silently loses strings.
+        locales = set(module)
+        assert set(LOCALES) <= locales
+        key_sets = {locale: set(module[locale]) for locale in locales}
         assert all(keys == key_sets["en-GB"] for keys in key_sets.values())
         for key in key_sets["en-GB"]:
-            values = {locale: module[locale][key] for locale in LOCALES}
+            values = {locale: module[locale][key] for locale in locales}
             assert all(isinstance(value, str) and value for value in values.values()), key
             assert all(_parameters(value) == _parameters(values["en-GB"]) for value in values.values()), key
 

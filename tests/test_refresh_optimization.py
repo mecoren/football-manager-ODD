@@ -1951,8 +1951,22 @@ class RefreshOptimizationTests(unittest.TestCase):
         self.assertEqual(
             refresh_source.count("championship_enabled=championship_enabled"), 2,
         )
-        self.assertIn("if championship_enabled:", refresh_source)
-        self.assertIn("if not championship_enabled:", result_source)
+        # The refresh gate is deliberately a disjunction: turning the
+        # championship off must not strand bets that are already placed, so the
+        # market/settlement block also runs while anything still needs settling.
+        self.assertIn(
+            "if championship_enabled or has_pending_championship_bets():",
+            refresh_source,
+        )
+        # Same disjunction in the light result worker: it folds the setting and
+        # the pending-bet escape into one flag and drops the markets only when
+        # neither applies.
+        self.assertIn(
+            "championship_required = championship_enabled "
+            "or has_pending_championship_bets()",
+            result_source,
+        )
+        self.assertIn("if not championship_required:", result_source)
 
     def test_disabled_championship_rejects_bets_before_payload_validation(self):
         state = LocalOddsState.__new__(LocalOddsState)

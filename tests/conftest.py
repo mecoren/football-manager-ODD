@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from frontend_source import legacy_web_source
+from frontend_source import legacy_web_source, raw_web_source
 from tools import app_settings
 
 

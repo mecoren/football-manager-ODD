@@ -91,6 +91,7 @@ def test_facade_reads_once_or_uses_explicit_snapshot_without_reading():
 def test_pure_profile_import_does_not_load_fm_or_storage_runtime():
     import subprocess
     import sys
+    from pathlib import Path
 
     subprocess.run([
         sys.executable, "-c",
@@ -99,4 +100,4 @@ def test_pure_profile_import_does_not_load_fm_or_storage_runtime():
         "assert not {'tools.preview_cup_odds','tools.app_paths',"
         "'tools.game_session','tools.initial_data_audit','fm_collector.win32'}"
         ".intersection(sys.modules)",
-    ], check=True)
+    ], check=True, cwd=Path(__file__).resolve().parents[1] / "src")

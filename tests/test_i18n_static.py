@@ -177,27 +177,22 @@ def test_index_has_no_nested_i18n_nodes_or_unkeyed_cjk_user_text() -> None:
 def test_index_loads_all_localization_modules_before_core_and_app() -> None:
     html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
     sources = re.findall(r'<script\s+src="([^"]+)"', html)
-    expected = [
-        "/i18n.static.js",
-        "/i18n.shell.js",
-        "/i18n.commerce.js",
-        "/i18n.items.js",
-        "/i18n.settings.js",
-        "/i18n.facilities.js",
-        "/i18n.world.js",
-        "/i18n.ko.js",
-        "/i18n.relationship.js",
-        "/i18n.tw.js",
-        "/i18n.de.js",
-        "/i18n.es.js",
-        "/i18n.fr.js",
-        "/i18n.ru.js",
-        "/i18n.ja.js",
-        "/i18n.pt-BR.js",
-        "/i18n.pt-PT.js",
-        "/i18n.enums.js",
-        "/i18n.js",
-        "/bet_analysis_page.js",
-        "/app.js",
+    core_index = sources.index("/i18n.js")
+    app_index = sources.index("/app.js")
+    modules = [
+        source for source in sources
+        if re.fullmatch(r"/i18n\.[^/]+\.js", source)
     ]
-    assert sources[-len(expected):] == expected
+    # An explicit order list used to live here, and it silently stopped covering
+    # new modules. The invariants that actually matter are structural: every
+    # localization module loads before the core runtime and the app, and the set
+    # of modules shipped on disk is exactly the set index.html loads, so a new
+    # catalog cannot land on disk without ever being referenced.
+    assert modules
+    for source in modules:
+        assert sources.index(source) < core_index, source
+    assert core_index < app_index
+    on_disk = sorted(
+        f"/{path.name}" for path in (ROOT / "web").glob("i18n.*.js")
+    )
+    assert sorted(modules) == on_disk

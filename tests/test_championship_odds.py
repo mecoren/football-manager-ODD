@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from conftest import legacy_web_source
+from conftest import legacy_web_source, raw_web_source
 
 from fm_odds_web import (
     LocalOddsState,
@@ -2288,7 +2288,7 @@ class ChampionshipOddsTests(unittest.TestCase):
     def test_frontend_exposes_championship_betting_entry_and_endpoint(self) -> None:
         index = legacy_web_source("web/index.html")
         script = legacy_web_source("web/app.js")
-        stylesheet = open("web/app.css", encoding="utf-8").read()
+        stylesheet = raw_web_source("web/app.css")
         self.assertNotIn('id="page-championship"', index)
         self.assertNotIn('data-page="championship"', index)
         self.assertIn('id="championship-content"', index)
