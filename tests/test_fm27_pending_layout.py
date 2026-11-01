@@ -9,6 +9,7 @@ import pytest
 from tools import initial_data_audit
 from tools.domain_errors import Fm27LayoutPendingError
 from tools.game_layout import (
+    FM24_LAYOUT,
     FM26_LAYOUT,
     FM27_EXE_SHA256,
     FM27_LAYOUT,
@@ -352,6 +353,34 @@ class FM27PendingLayoutTests(unittest.TestCase):
         self.assertEqual(layout.player_fitness_offset, 0x25C)
         self.assertEqual(layout.player_morale_offset, 0x26C)
         self.assertEqual(layout.player_injury_list_offset, 0xF8)
+
+    def test_reputation_triple_is_named_end_to_end(self):
+        """Round 118: the save separates home / current / world.
+
+        Range testing could not name any of the three (all 0..10000, 17268/17268)
+        and round 114 could only fix world, from the FM24/FM26 slot order plus
+        the CA-correlation gradient. The save carries the three values apart, so
+        over 14509 matched players each slot scores 14509/14509 against its own
+        field and at most 18.22% against the others - home 0x25E, current 0x260,
+        world 0x262.
+
+        FM27 is the first layout since FM24 to declare all three. FM24 carries
+        them at 0x1FA/0x1FC/0x1FE, FM26 declares only world and leaves home and
+        current None, and the editor's capability flags are gated on exactly
+        those two attributes - so declaring them is what turns home/current
+        reputation from a silently skipped field into a readable and writable
+        one for FM27.
+        """
+        layout = FM27_LAYOUT
+        self.assertEqual(layout.player_home_reputation_offset, 0x25E)
+        self.assertEqual(layout.player_current_reputation_offset, 0x260)
+        self.assertEqual(layout.player_world_reputation_offset, 0x262)
+        self.assertEqual(FM24_LAYOUT.player_home_reputation_offset, 0x1FA)
+        self.assertEqual(FM24_LAYOUT.player_current_reputation_offset, 0x1FC)
+        self.assertEqual(FM24_LAYOUT.player_world_reputation_offset, 0x1FE)
+        self.assertIsNone(FM26_LAYOUT.player_home_reputation_offset)
+        self.assertIsNone(FM26_LAYOUT.player_current_reputation_offset)
+        self.assertEqual(FM26_LAYOUT.player_world_reputation_offset, 0x262)
 
     def test_player_and_person_blocks_are_fm26_offsets_field_for_field(self):
         """Round 111: FM27's row layout is FM26's, and only FM26's.

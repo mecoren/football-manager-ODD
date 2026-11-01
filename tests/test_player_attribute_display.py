@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from tools.club_reader import (
+    PLAYER_HIDDEN_ATTRIBUTE_IDS,
     VISIBLE_ATTRIBUTE_IDS,
     _display_attribute,
     _visible_player_attributes,
@@ -45,6 +46,17 @@ def test_the_seven_unpublished_attribute_ids_are_foot_and_hidden_fields():
     assert published <= set(range(0x0F, 0x45))
     assert set(range(0x0F, 0x45)) - published == {
         0x27, 0x28, 0x38, 0x3B, 0x3E, 0x3F, 0x40,
+    }
+
+    # Round 118 named all seven from the save: the two the save has no field for
+    # are the feet (id 0x27 == raw_left_foot, id 0x28 == raw_right_foot, both
+    # 14509/14509 exact on the same 1..100 scale), and the other five are its
+    # dirtiness / consistency / important matches / injury proneness /
+    # versatility. The shipped table already used those ids.
+    assert PLAYER_HIDDEN_ATTRIBUTE_IDS == {
+        "左脚": 0x27, "右脚": 0x28, "肮脏动作": 0x38,
+        "稳定性": 0x3B, "大赛发挥": 0x3E,
+        "受伤倾向": 0x3F, "多面性": 0x40,
     }
 
 

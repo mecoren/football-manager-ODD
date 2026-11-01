@@ -1480,6 +1480,35 @@ FM27_LAYOUT = GameLayout(
     # coverage is 17267/17268 first names, 17265/17268 last names and
     # 1862/17268 common names, which is what _build_person_search_index already
     # does at database_index.py:913-921.
+    # Round 118 pushed the same join through the fields that range tests and the
+    # CA model could not separate, and every one of them came back exact:
+    #   positions     all 15 slots at 0x150 exact for 14509/14509, max |delta| 0,
+    #                 including GK and SW. This supersedes the round-114 label
+    #                 derivation, and it explains why the set comparison failed
+    #                 there: that dump used the save's ACCOMPLISHED tuple, while
+    #                 the save's `positions` object is the same 15 ratings the
+    #                 matrix holds - same slots, same values, same scale.
+    #   condition     0x258 = raw_match_sharpness 100.00%, 0x25C = raw_condition
+    #                 100.00%, and 0x25A matches neither (0.00% exact, 0.00%
+    #                 within +-1), so the unset fatigue field is now ruled out by
+    #                 positive evidence rather than by a failed range test.
+    #   reputation    home 0x25E, current 0x260, world 0x262: each is 100% against
+    #                 its own save field and <= 18.22% against the others.
+    #   feet          the two attribute ids the save cannot name are the feet:
+    #                 id 0x27 == raw_left_foot and id 0x28 == raw_right_foot, both
+    #                 100.00%, on the same 1..100 scale the display transform
+    #                 expects (100 -> 20, 50 -> 10).
+    #   personality   person+0x70..0x77 is an 8x8 perfect diagonal against the
+    #                 save's adaptability, ambition, loyalty, pressure,
+    #                 professionalism, sportsmanship, temperament and controversy,
+    #                 which is exactly PERSON_HIDDEN_ATTRIBUTE_NAMES' order.
+    #   traits        the u64 at person+0xC0 equals the save's trait_bits for
+    #                 14509/14509 (the 59.4% that neighbours score is the share
+    #                 of players whose bitfield is zero - a built-in control).
+    #   asking price  the u32 at 0x234 equals the save's transfer_value for
+    #                 14509/14509 while 0x22C/0x230/0x238/0x23C are all 0.00%,
+    #                 which confirms the value the product hardcodes for every
+    #                 non-FM24 build.
     # Limits of the oracle, stated up front: fmsave registers a single FM27
     # build and marks every FM27 field unconfirmed, so it can flag anomalies but
     # never proves a layout; 2773 of its 17631 rows carry unique_id 0 and cannot
@@ -1689,15 +1718,16 @@ FM27_LAYOUT = GameLayout(
     #
     # 0x262 sits in a run of three adjacent u16s (0x25E, 0x260, 0x262) that are
     # ALL 0..10000 in 17268/17268 rows, so a range test cannot name any of them.
-    # The naming here rests on two things that can: the slot order FM24 and FM26
-    # share (home, current, world), and the CA-correlation gradient across the
-    # run, which is +0.989 / +0.980 / +0.838 - world reputation is the least
-    # ability-tight of the three and the only one that saturates the scale (max
-    # exactly 10000). Their MEANS run 3881 / 4052 / 2487, i.e. the other way, so
-    # "world reputation must be the biggest" is false and must never be used as
-    # a check. Home (0x25E) and current (0x260) stay unset on purpose: nothing
-    # available here separates those two from each other, and picking one would
-    # be the same species of guess that got the three position fields retracted.
+    # Round 114 named 0x262 from the FM24/FM26 slot order plus the CA-correlation
+    # gradient (+0.989 / +0.980 / +0.838); round 118 then settled the whole run
+    # with the save, which carries home/current/world separately: over 14509
+    # matched players each slot is exact for 14509/14509 against its own field
+    # and only 18.22% / 18.22% / 0.05% against the others. So 0x25E is home,
+    # 0x260 is current and 0x262 is world, and the three are now declared.
+    # Do not reuse the old shortcut "world should be the biggest": the means run
+    # 3927 / 4107 / 2527, i.e. world is the SMALLEST of the three.
+    player_home_reputation_offset=0x25E,
+    player_current_reputation_offset=0x260,
     player_world_reputation_offset=0x262,
     player_sharpness_offset=0x258,
     player_fitness_offset=0x25C,
@@ -1715,8 +1745,13 @@ FM27_LAYOUT = GameLayout(
     # verdict does not depend on the sample. It must not be guessed because
     # adjust_player_training_condition WRITES u16(address + player_fatigue_offset)
     # and clamps to 0..10000, so a wrong offset would corrupt unrelated bytes.
-    # Left None, the write path raises "当前游戏版本尚未完整映射球员身体状态" and
-    # the read path reports None.
+    # Round 118 added positive evidence instead of another range test: the save
+    # carries raw_condition and raw_match_sharpness, and 0x25A matches NEITHER
+    # of them for a single player (0.00% exact and 0.00% within +-1, over 14509
+    # rows), while 0x258 = sharpness and 0x25C = condition are each 100.00%.
+    # So 0x25A is not a condition field at all in FM27, and the write path stays
+    # closed. Left None, it raises "当前游戏版本尚未完整映射球员身体状态" and the
+    # read path reports None.
     player_fatigue_offset=None,
     # Resolved by the vtable + person-UID constraint (see the note above).
     # The person sub-object at +0x440 is confirmed twice over: u32(+0x44C) = the
