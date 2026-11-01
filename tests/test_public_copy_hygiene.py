@@ -4,7 +4,7 @@ import ast
 import re
 from pathlib import Path
 
-from tools.player_rca import FM24_RCA_MODEL, FM26_RCA_MODEL
+from tools.player_rca import FM24_RCA_MODEL, FM26_RCA_MODEL, FM27_RCA_MODEL
 
 
 ROOT = (Path(__file__).resolve().parents[1] / "src")
@@ -69,3 +69,4 @@ def test_public_errors_and_payloads_do_not_name_research_sources() -> None:
 def test_public_rca_model_ids_do_not_name_research_sources() -> None:
     assert not RESEARCH_SOURCE_PATTERN.search(FM24_RCA_MODEL)
     assert not RESEARCH_SOURCE_PATTERN.search(FM26_RCA_MODEL)
+    assert not RESEARCH_SOURCE_PATTERN.search(FM27_RCA_MODEL)

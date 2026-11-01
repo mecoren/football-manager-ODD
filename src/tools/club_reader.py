@@ -42,6 +42,7 @@ from tools.player_rca import (
     fm24_recommended_ca, fm24_training_ca_change,
     fm26_attribute_ca_milestones, fm26_ca_budget_attribute_change,
     fm26_recommended_ca, fm26_training_ca_change,
+    rca_model_for_layout_key,
 )
 from tools.retirement import (
     attach_retirement_details, retirement_record_index, update_retirement_plan,
@@ -6913,10 +6914,12 @@ def read_world_player_profile(player_id: int) -> dict[str, Any]:
                 "attribute_display_bias": int(
                     getattr(layout, "attribute_display_bias", 0) or 0
                 ),
-                "ca_model": (
-                    FM24_RCA_MODEL if layout.key.startswith("fm24")
-                    else FM26_RCA_MODEL if layout.key.startswith("fm26")
-                    else ""
+                # FM27 publishes a model even though it reuses FM26's weight
+                # table: the draft is read-only, so the fitted intercept it
+                # carries cannot reach a save. Training and item paths are a
+                # different question and stay gated by `_rca_functions`.
+                "ca_model": rca_model_for_layout_key(
+                    str(getattr(layout, "key", "") or "")
                 ),
                 "capabilities": {
                     "goalkeeper": (

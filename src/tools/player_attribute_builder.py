@@ -27,11 +27,14 @@ from typing import Any, Mapping, Sequence
 from tools.player_rca import (
     FM24_RCA_MODEL,
     FM26_RCA_MODEL,
+    FM27_RCA_MODEL,
     FMRTE_POSITION_PRIORITY,
     FMRTE_RCA_WEIGHTS,
     fm24_best_position_key,
     fm24_recommended_ca,
     fm26_recommended_ca,
+    fm27_recommended_ca,
+    rca_ca_offset,
 )
 
 CA_SLOPE = 19.929
@@ -192,6 +195,8 @@ def _recommended_ca_function(model: str) -> Any:
         return fm24_recommended_ca
     if label.startswith("fm26"):
         return fm26_recommended_ca
+    if label.startswith("fm27"):
+        return fm27_recommended_ca
     raise ValueError("当前游戏版本没有已验证的 CA 属性公式")
 
 
@@ -326,6 +331,8 @@ def build_player_attribute_draft(
     if not writable_ids:
         raise ValueError("该球员没有可写入的属性")
     recommended_ca = _recommended_ca_function(model)
+    # The fitted per-version intercept also moves the target band, below.
+    ca_offset = rca_ca_offset(model)
 
     is_goalkeeper = GOALKEEPING_ATTRIBUTE_ID in writable_ids
     group = "goalkeeper" if is_goalkeeper else "outfield"
@@ -342,9 +349,15 @@ def build_player_attribute_draft(
     shape = _shape_weights(tied_keys)
     style_bias = ATTRIBUTE_STYLES[style_key][group]
 
-    _low, _high, ideal = _target_band(target)
-    span = 6.0 if ideal >= 11.0 else 5.0 if ideal >= 6.0 else 3.5
-    damping = 1.0 if ideal >= 8.0 else 0.6
+    _low, _high, centre = _target_band(target)
+    # A fitted per-version intercept has to move the whole band with it: the
+    # solver's direction test and the shaped level must both be expressed in
+    # the average that the version's own formula would read, otherwise the
+    # search starts outside the band and settles a few CA points off target.
+    band_shift = ca_offset / CA_SLOPE
+    ideal = centre - band_shift
+    span = 6.0 if centre >= 11.0 else 5.0 if centre >= 6.0 else 3.5
+    damping = 1.0 if centre >= 8.0 else 0.6
     mean_shape = sum(float(shape.get(attribute_id, 0.0)) for attribute_id in adjustable) / len(adjustable)
     top_shape = max(float(shape.get(attribute_id, 0.0)) for attribute_id in adjustable) or 1.0
     base = {
@@ -413,7 +426,7 @@ def build_player_attribute_draft(
             break
         if not readable:
             break
-        direction = _band_direction(average, target)
+        direction = _band_direction(average + band_shift, target)
         picked = _pick_adjustment(values, baseline, formula_weights, adjustable, direction)
         if picked is None:
             break

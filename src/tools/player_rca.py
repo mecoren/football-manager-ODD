@@ -5,6 +5,42 @@ from typing import Sequence
 
 FM24_RCA_MODEL = "fm24-verified-rca-v1"
 FM26_RCA_MODEL = "fm26-verified-rca-v1"
+FM27_RCA_MODEL = "fm27-verified-rca-v1"
+
+# FM27 shares FM26's position weight table and CA curve, but the curve reads
+# FM27 current ability about three points low. Measured on a live FM27 save by
+# ``scripts/verify_fm27_rca.py`` over 72 players across six CA bands (12 each,
+# stratified by best position): mean|err| 3.681, signed -3.153, |err| <= 5 in
+# 57/72 with no offset; a held-out half after a +3 shift gives mean|err| 2.833,
+# signed -0.333, |err| <= 5 in 34/36. The display_bias=0 control is far worse
+# (mean|err| 9.986, signed -9.986), so bias 2 stays the right transform.
+# This is a FITTED intercept rather than independent evidence, which is why it
+# lives in a named per-version constant instead of inside the shared curve.
+FM27_RCA_CA_OFFSET = 3.0
+RCA_CA_SLOPE = 19.929
+
+
+def rca_model_for_layout_key(layout_key: str) -> str:
+    """Return the CA model id the attribute draft may use for a layout key.
+
+    FM27 reuses FM26's numbers and only adds ``FM27_RCA_CA_OFFSET``. Training
+    and item paths keep their own, stricter gate in ``club_reader``
+    (``_rca_functions``) and stay closed for FM27.
+    """
+    key = str(layout_key or "")
+    if key.startswith("fm24"):
+        return FM24_RCA_MODEL
+    if key.startswith("fm26"):
+        return FM26_RCA_MODEL
+    if key.startswith("fm27"):
+        return FM27_RCA_MODEL
+    return ""
+
+
+def rca_ca_offset(model: str) -> float:
+    """Return the fitted CA intercept for a model id (0 for the shared curve)."""
+    return FM27_RCA_CA_OFFSET if str(model or "").startswith("fm27") else 0.0
+
 
 # Position keys match FMRTE PlayerGeneralPosition. Each tuple contains the
 # non-zero attribute weights followed by the weaker-foot weight.
@@ -135,7 +171,7 @@ def fm24_best_position_key(position_ratings: Sequence[int]) -> int:
 
 def _recommended_ca(
     raw_attributes: bytes, position_ratings: Sequence[int], display_bias: int = 0,
-    model: str = FM24_RCA_MODEL,
+    model: str = FM24_RCA_MODEL, ca_offset: float = 0.0,
 ) -> dict[str, float | int | str]:
     if len(raw_attributes) != 54:
         raise ValueError("球员属性块无法安全读取")
@@ -157,7 +193,14 @@ def _recommended_ca(
     weighted_value += weaker_foot_weight * weaker_foot
     total_weight += weaker_foot_weight
     average = weighted_value / total_weight
-    value = 1.0 if average <= 6 else 200.0 if average > 16 else 19.929 * average - 119.38
+    # A fitted offset is applied as a shift of the average, not of the output,
+    # so the CA 1 and CA 200 guards still behave like one-sided bands.
+    adjusted = average + float(ca_offset) / RCA_CA_SLOPE
+    value = (
+        1.0 if adjusted <= 6
+        else 200.0 if adjusted > 16
+        else RCA_CA_SLOPE * adjusted - 119.38
+    )
     return {
         "model": model,
         "position_key": position_key,
@@ -180,6 +223,21 @@ def fm26_recommended_ca(
 ) -> dict[str, float | int | str]:
     return _recommended_ca(
         raw_attributes, position_ratings, display_bias, FM26_RCA_MODEL,
+    )
+
+
+def fm27_recommended_ca(
+    raw_attributes: bytes, position_ratings: Sequence[int], display_bias: int = 2,
+) -> dict[str, float | int | str]:
+    """FM27: same weight table, display bias 2, fitted CA intercept.
+
+    ``display_bias`` defaults to 2 here instead of 0 because FM27 stores the
+    attribute bytes as ``display * 5 - 2``; passing 0 silently reads every
+    attribute one point low on the raw%5 == 3,4 residues.
+    """
+    return _recommended_ca(
+        raw_attributes, position_ratings, display_bias, FM27_RCA_MODEL,
+        FM27_RCA_CA_OFFSET,
     )
 
 
